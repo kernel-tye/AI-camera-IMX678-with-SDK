@@ -1,0 +1,14 @@
+# 源码/脚本一律 LF —— 本项目在 Linux 上编译, CRLF 会破坏 .sh 和构建
+# Source/scripts are LF only — built on Linux; CRLF would break shell scripts.
+* text=auto eol=lf
+
+# 二进制不做换行转换 / binaries: no EOL conversion
+*.squashfs binary
+*.a  binary
+*.so binary
+*.ko binary
+*.om binary
+*.bin binary
+*.bgr binary
+mtdwrite binary
+opt_stage/** binary
