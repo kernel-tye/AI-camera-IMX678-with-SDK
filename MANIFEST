@@ -1,0 +1,7 @@
+# 本项目对厂商 SDK (a55_linux/source) 的全部改动 —— 路径相对 source/
+# sony_imx678: 整个目录为新增(从 sony_imx515 cp 后改), 厂商 SDK 原本无此传感器
+mpp/cbb/isp/user/sensor/hi3519dv500/sony_imx678
+mpp/sample/Makefile.param
+mpp/sample/common/sample_comm_vi.c
+mpp/sample/common/sample_comm_isp.c
+mpp/sample/venc/sample_venc.c

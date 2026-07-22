@@ -1,0 +1,551 @@
+<title>驯服 IMX678 — Hi3519DV500 移植 · 出图 · 固化 · 工程参考</title>
+<style>
+  :root{
+    --bg:#0c0f14; --bg2:#11151c; --panel:#141a22; --panel2:#0f141b;
+    --ink:#d8e0ea; --ink-dim:#96a3b4; --ink-faint:#5f6d7e;
+    --line:#222c38; --line2:#2c3846;
+    --signal:#38e0c8; --bug:#e14b9b;
+    --warn:#e6b25a; --good:#57d18a; --danger:#ec5f6a;
+    --mono:ui-monospace,"SF Mono","Cascadia Code","JetBrains Mono",Menlo,Consolas,monospace;
+    --sans:system-ui,-apple-system,"Segoe UI","Noto Sans CJK SC","Microsoft YaHei",sans-serif;
+  }
+  @media (prefers-color-scheme:light){
+    :root{ --bg:#eef1f5; --bg2:#e6eaf0; --panel:#ffffff; --panel2:#f4f6f9;
+      --ink:#16202c; --ink-dim:#465565; --ink-faint:#8494a5;
+      --line:#dbe1e9; --line2:#c8d1dc; --signal:#0e9e8a; --bug:#c02f7f; }
+  }
+  :root[data-theme="dark"]{ --bg:#0c0f14; --bg2:#11151c; --panel:#141a22; --panel2:#0f141b;
+    --ink:#d8e0ea; --ink-dim:#96a3b4; --ink-faint:#5f6d7e; --line:#222c38; --line2:#2c3846;
+    --signal:#38e0c8; --bug:#e14b9b; }
+  :root[data-theme="light"]{ --bg:#eef1f5; --bg2:#e6eaf0; --panel:#ffffff; --panel2:#f4f6f9;
+    --ink:#16202c; --ink-dim:#465565; --ink-faint:#8494a5; --line:#dbe1e9; --line2:#c8d1dc;
+    --signal:#0e9e8a; --bug:#c02f7f; }
+  *{box-sizing:border-box}
+  body{margin:0;background:var(--bg);color:var(--ink);font-family:var(--sans);
+    line-height:1.7;font-size:16px;-webkit-font-smoothing:antialiased}
+  .wrap{max-width:860px;margin:0 auto;padding:0 22px 120px}
+  ::selection{background:var(--signal);color:var(--bg)}
+
+  header{padding:70px 0 36px;border-bottom:1px solid var(--line)}
+  .eyebrow{font-family:var(--mono);font-size:12px;letter-spacing:.22em;text-transform:uppercase;color:var(--signal);margin:0 0 18px}
+  h1{font-family:var(--mono);font-weight:700;font-size:clamp(26px,4.6vw,40px);line-height:1.14;letter-spacing:-.01em;margin:0 0 16px;text-wrap:balance}
+  h1 .mag{color:var(--bug)}
+  .lede{font-size:18px;color:var(--ink-dim);max-width:62ch;margin:0}
+  .meta{display:flex;flex-wrap:wrap;gap:7px 22px;margin-top:24px;font-family:var(--mono);font-size:12.5px;color:var(--ink-faint)}
+  .meta b{color:var(--ink-dim);font-weight:600}
+
+  h2{font-family:var(--mono);font-size:13px;letter-spacing:.15em;text-transform:uppercase;color:var(--signal);margin:0 0 4px}
+  .phase{margin:58px 0 0;padding-top:28px;border-top:1px solid var(--line)}
+  .phase-h{font-weight:700;font-size:25px;letter-spacing:-.01em;margin:6px 0 14px;color:var(--ink);text-wrap:balance}
+  .num{font-family:var(--mono);color:var(--bug);font-weight:700}
+  p{margin:0 0 15px}
+  a{color:var(--signal)}
+  strong{color:var(--ink);font-weight:700}
+  em{color:var(--signal);font-style:normal;font-family:var(--mono);font-size:.92em}
+  .sub{font-weight:700;font-size:16px;margin:26px 0 9px;color:var(--ink);
+    font-family:var(--mono);letter-spacing:.01em}
+  .sub::before{content:"› ";color:var(--signal)}
+  ul{margin:0 0 15px;padding-left:0;list-style:none}
+  li{position:relative;padding-left:20px;margin:0 0 8px}
+  li::before{content:"▸";position:absolute;left:2px;color:var(--signal);font-size:12px;top:2px}
+
+  code{font-family:var(--mono);font-size:.86em;background:var(--panel2);border:1px solid var(--line);padding:1px 5px;border-radius:5px;color:var(--ink);white-space:nowrap}
+  pre{background:var(--panel2);border:1px solid var(--line);border-left:3px solid var(--signal);border-radius:8px;padding:14px 16px;overflow-x:auto;margin:0 0 16px;font-size:12.5px;line-height:1.62}
+  pre code{background:none;border:0;padding:0;white-space:pre;font-size:12.5px}
+  pre .c{color:var(--ink-faint)}    /* comment */
+  pre .del{color:var(--bug)}
+  pre .add{color:var(--good)}
+
+  .file{font-family:var(--mono);font-size:12px;color:var(--signal);background:var(--panel2);
+    border:1px solid var(--line);border-bottom:0;border-radius:8px 8px 0 0;padding:7px 14px;
+    letter-spacing:.02em;margin:16px 0 0;display:flex;justify-content:space-between;align-items:center}
+  .file+pre{border-radius:0 0 8px 8px;margin-top:0}
+  .file .why{color:var(--ink-faint);font-size:11px}
+
+  .callout{border:1px solid var(--line2);border-radius:10px;padding:16px 19px;margin:20px 0;background:var(--panel)}
+  .callout .tag{font-family:var(--mono);font-size:11px;letter-spacing:.14em;text-transform:uppercase;font-weight:700;display:inline-block;margin-bottom:8px}
+  .callout p:last-child{margin-bottom:0}
+  .c-root{border-color:color-mix(in srgb,var(--bug) 55%,var(--line2));background:color-mix(in srgb,var(--bug) 9%,var(--panel))}
+  .c-root .tag{color:var(--bug)}
+  .c-win{border-color:color-mix(in srgb,var(--good) 45%,var(--line2));background:color-mix(in srgb,var(--good) 8%,var(--panel))}
+  .c-win .tag{color:var(--good)}
+  .c-warn{border-color:color-mix(in srgb,var(--warn) 50%,var(--line2));background:color-mix(in srgb,var(--warn) 8%,var(--panel))}
+  .c-warn .tag{color:var(--warn)}
+  .c-sci{border-color:color-mix(in srgb,var(--signal) 38%,var(--line2));background:color-mix(in srgb,var(--signal) 6%,var(--panel))}
+  .c-sci .tag{color:var(--signal)}
+  .c-sci .h{font-weight:700;color:var(--ink);font-size:16px;margin:0 0 8px}
+  .ba{display:grid;grid-template-columns:1fr 1fr;gap:14px;margin:26px 0 6px}
+  .ba figure{margin:0}
+  .ba img{width:100%;height:auto;display:block;border-radius:9px;border:1px solid var(--line2)}
+  .ba figcaption{font-family:var(--mono);font-size:11.5px;margin-top:9px;line-height:1.5}
+  .ba .cb{color:var(--bug)} .ba .cg{color:var(--good)}
+  .ba .cb b,.ba .cg b{display:block;font-size:13px;letter-spacing:.04em}
+  @media(max-width:560px){.ba{grid-template-columns:1fr}}
+  .figcap{font-family:var(--mono);font-size:11.5px;color:var(--ink-faint);text-align:center;margin:2px 0 0}
+
+  table{width:100%;border-collapse:collapse;margin:0;font-family:var(--mono);font-size:12.5px}
+  .tw{overflow-x:auto;margin:6px 0 18px;border:1px solid var(--line);border-radius:8px}
+  th{text-align:left;font-weight:700;color:var(--ink-dim);border-bottom:1px solid var(--line2);padding:8px 12px;font-size:11px;letter-spacing:.06em;text-transform:uppercase;white-space:nowrap;background:var(--panel2)}
+  td{padding:7px 12px;border-bottom:1px solid var(--line);vertical-align:top;font-variant-numeric:tabular-nums}
+  tr:last-child td{border-bottom:0}
+  .bad{color:var(--bug)} .ok{color:var(--good)} .dim{color:var(--ink-faint)} .wn{color:var(--warn)}
+
+  .refcard{background:var(--panel);border:1px solid var(--line2);border-radius:10px;padding:4px 20px;margin:26px 0}
+  .refrow{display:grid;grid-template-columns:130px 1fr;gap:14px;padding:9px 0;border-bottom:1px solid var(--line);font-size:13.5px}
+  .refrow:last-child{border-bottom:0}
+  .refrow .l{font-family:var(--mono);font-size:11px;letter-spacing:.1em;text-transform:uppercase;color:var(--ink-faint);padding-top:2px}
+  .refrow .r{font-family:var(--mono);font-size:12.5px;color:var(--ink);word-break:break-all}
+  @media(max-width:560px){.refrow{grid-template-columns:1fr;gap:2px}}
+
+  .quote{border-left:3px solid var(--bug);padding:4px 0 4px 18px;margin:20px 0;color:var(--ink-dim);font-size:16px}
+  .toc{font-family:var(--mono);font-size:13px;margin:30px 0 0;columns:2;column-gap:26px}
+  .toc a{display:block;padding:5px 0;color:var(--ink-dim);text-decoration:none;border-bottom:1px solid var(--line)}
+  .toc a:hover{color:var(--signal)}
+  .toc a b{color:var(--bug);margin-right:8px}
+  @media(max-width:560px){.toc{columns:1}}
+  footer{margin-top:64px;padding-top:24px;border-top:1px solid var(--line);font-family:var(--mono);font-size:12.5px;color:var(--ink-faint)}
+  footer b{color:var(--ink-dim)}
+</style>
+
+<div class="wrap">
+<header>
+  <p class="eyebrow">Sensor Bring-up → Shipped Firmware · 工程参考 / Reference Edition</p>
+  <h1>驯服 <span class="mag">IMX678</span> · Hi3519DV500<br>从乱码到烧进 flash 的完整参考</h1>
+  <p class="lede">把一颗官方 SDK 不支持的 Sony IMX678 硬移植到海思 Hi3519DV500——从满屏解不开的紫色乱码,到 4K 网页直播、自制 RTSP,再到<strong>整台相机烧进 32MB flash 插电自启</strong>。本篇精确到<strong>每个改动文件、编译命令、寄存器值、烧写偏移和验证命令</strong>,可复现。</p>
+  <div class="meta">
+    <span><b>SoC</b> Hi3519DV500 aarch64 musl</span>
+    <span><b>Sensor</b> IMX678 · 4K RAW12 · 4lane</span>
+    <span><b>SDK</b> V1.0.2.0</span>
+    <span><b>接口</b> bus3 @0x1a · 4-lane · 148MHz phy</span>
+    <span><b>成品</b> kernel 5.57M + jffs2 2.62M + squashfs 3.46M</span>
+  </div>
+  <nav class="toc">
+    <a href="#env"><b>00</b>环境与路径速查</a>
+    <a href="#p1"><b>01</b>模板:imx515 双胞胎</a>
+    <a href="#p2"><b>02</b>I2C 总线 = 3</a>
+    <a href="#p3"><b>03</b>反汇编抠寄存器</a>
+    <a href="#p4"><b>04</b>根因:MCLK 时钟</a>
+    <a href="#p5"><b>05</b>帧全丢:OB 高度</a>
+    <a href="#p6"><b>06</b>发紫:Bayer</a>
+    <a href="#p7"><b>07</b>管线 + 网页 App</a>
+    <a href="#build"><b>B</b>构建命令汇总</a>
+    <a href="#run"><b>R</b>运行与验证命令</a>
+    <a href="#backup"><b>S</b>固件备份 + 自动化</a>
+    <a href="#p8"><b>08</b>网页:连接重置</a>
+    <a href="#p9"><b>09</b>根因:GAIN 地址</a>
+    <a href="#p10"><b>10</b>自制 RTSP</a>
+    <a href="#p11"><b>11</b>固化进 flash</a>
+    <a href="#p12"><b>12</b>根因:网络鬼故事</a>
+    <a href="#p13"><b>13</b>成品化 + 屏幕</a>
+    <a href="#diff"><b>Δ</b>改动总清单</a>
+  </nav>
+</header>
+
+<div class="figure">
+  <div class="ba">
+    <figure><img src="data:image/jpeg;base64,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" alt="早期紫屏"><figcaption class="cb"><b>✗ 早期</b>Bayer=GBRG · 满屏品红 · 色彩重建错位</figcaption></figure>
+    <figure><img src="data:image/jpeg;base64,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" alt="修复后正常"><figcaption class="cg"><b>✓ 最终</b>Bayer=RGGB · 颜色归位 · 同一传感器,一枚举之差</figcaption></figure>
+  </div>
+  <p class="figcap">IMX678 实拍 · 左右均由同一块板子输出 · 中间隔着本文的全部排错</p>
+</div>
+
+<div class="phase" id="env" style="border-top:0;padding-top:32px">
+<h2>00 · Reference</h2>
+<div class="phase-h">环境与路径速查</div>
+<div class="refcard">
+  <div class="refrow"><div class="l">编译机</div><div class="r">ty@192.168.0.48（VM，ens37=192.168.1.50 直连板子）· Ubuntu 20.04 x86_64</div></div>
+  <div class="refrow"><div class="l">板子</div><div class="r">192.168.1.160 · 串口 COM10 @115200 · 传感器 i2c bus3 @0x1a(8bit 0x34)</div></div>
+  <div class="refrow"><div class="l">SDK 根</div><div class="r">~/hi3519/SMP_Linux_GCC_musl/01.software/board/Hi3519DV500_SDK_V1.0.2.0</div></div>
+  <div class="refrow"><div class="l">源码 $SRC</div><div class="r">$SDK/smp/a55_linux/source</div></div>
+  <div class="refrow"><div class="l">工具链 PATH</div><div class="r">~/hi3519/SMP_Linux_GCC_musl/gcc-20240819-aarch64-v01c01-linux-musl/aarch64-v01c01-linux-musl-gcc/bin</div></div>
+  <div class="refrow"><div class="l">传感器目录</div><div class="r">$SRC/mpp/cbb/isp/user/sensor/hi3519dv500/sony_imx678</div></div>
+  <div class="refrow"><div class="l">nfsroot</div><div class="r">$SRC/bsp/pub/rootfs_musl_arm64（= 板子 / ，NFS 挂载 = 改完即用）</div></div>
+  <div class="refrow"><div class="l">板子接入</div><div class="r">无 telnetd → 板端 <code>tcpsvd -vE 0 23 /bin/sh &</code>；VM 端 <code>nc 192.168.1.160 23</code></div></div>
+</div>
+</div>
+
+<div class="phase" id="p1">
+<h2>Phase 01</h2>
+<div class="phase-h"><span class="num">01</span> 模板:imx515 是完美双胞胎</div>
+<p>SDK 无 imx678,但 <strong>sony_imx515</strong> 与之近亲(Sony 8MP / 4-lane / RAW12 / 3840×2160)。以它为骨架:</p>
+<pre><code>cd $SRC/mpp/cbb/isp/user/sensor/hi3519dv500
+cp -r sony_imx515 sony_imx678
+cd sony_imx678
+<span class="c"># 文件名 + 符号全部 imx515→imx678（g_sns_imx515_obj→g_sns_imx678_obj 等）</span>
+for f in *; do mv "$f" "${f/imx515/imx678}"; done
+sed -i 's/imx515/imx678/g; s/IMX515/IMX678/g' *</code></pre>
+<p><strong>关键认识</strong>:sed 只改了符号名,<em>寄存器地址和数值仍是 imx515 的</em> —— 这埋下后面 cmos 地址错、Bayer 错、OB 错等一连串雷。父目录 Makefile 自动发现新 sensor 目录。</p>
+</div>
+
+<div class="phase" id="p2">
+<h2>Phase 02</h2>
+<div class="phase-h"><span class="num">02</span> 找对 I2C 总线</div>
+<p>初跑满屏 <code>I2C_WRITE error</code>（130+）。让 sample 后台跑(传感器才上电有 MCLK),逐总线 <code>i2cdetect -y -r N</code> 扫 → 传感器在 <strong>bus 3, 0x1a</strong> 现身。</p>
+<div class="file">$SRC/mpp/sample/common/sample_comm_vi.c · L675 <span class="why">I2C 总线号</span></div>
+<pre><code><span class="del">- sns_info->bus_id = 4;  /* asic i2c4 */</span>
+<span class="add">+ sns_info->bus_id = 3;  /* imx678 在 i2c3 */</span></code></pre>
+<p>I2C 错误 <span class="bad">130+</span> → <span class="ok">0</span>。</p>
+</div>
+
+<div class="phase" id="p3">
+<h2>Phase 03</h2>
+<div class="phase-h"><span class="num">03</span> 反汇编抠寄存器表</div>
+<p>初始化寄存器序列编在原厂 <code>libsns_imx678.so</code>。反汇编抽取:</p>
+<pre><code>aarch64-...-objdump -d libsns_imx678.so > imx678.asm
+<span class="c"># 每次写寄存器: mov w2,#data ; mov w1,#addr ; bl imx678_write_register</span>
+awk '/mov\tw1, #0x/{if(match($0,/#0x[0-9a-f]+/))a=substr($0,RSTART+1,RLENGTH-1)}
+     /mov\tw2, #0x/{if(match($0,/#0x[0-9a-f]+/))d=substr($0,RSTART+1,RLENGTH-1)}
+     /bl.*imx678_write_register/{gsub(":","",$1);printf"%s %s %s\n",$1,a,d}' imx678.asm</code></pre>
+<p>线性 8M init 入口 <code>0x3eb0</code>,调用链 <code>0x3eb0(直接写5条) → 0x3a30(INCK/VMAX 47条) → 0x1890(大块 pathA 323条) → 0x3e00(1条) → 释放</code>,共 <strong>376 条写</strong>,搬进 <code>imx678_sensor_ctl.c</code> 的 <code>imx678_linear_8m_init()</code>。</p>
+<div class="callout c-warn"><span class="tag">⚠ path A/B 岔路</span><p><code>0x1890</code> 有 <code>cmp w1,#1; b.eq</code> 靠全局标志的运行时分叉:pathA=323 条(首次完整 init),pathB=44 条(已初始化重入)。首次上电走 A。抠错 = 缺一大半。</p></div>
+<div class="callout c-warn"><span class="tag">⚠ 别直接用 blob</span><p>原厂 .so 是 <code>MPP V1.0.1.1 / 2023-11-23</code> 编的,与 SDK V1.0.2.0 的 <code>ot_isp_sns_obj</code> 结构布局不一致 → 3A 回调注册栈溢出<strong>段错误</strong>。必须把寄存器数值搬进 imx515-源码编的 ABI 原生驱动,而非用二进制。</p></div>
+
+<div class="callout c-sci">
+  <span class="tag">🔬 科普</span>
+  <p class="h">这 ~300 个寄存器到底在配什么?</p>
+  <p>绝大多数不是"功能开关",而是 Sony 出厂标定的<strong>模拟前端魔法数字</strong>。按作用分几类:</p>
+  <ul>
+    <li><strong>时钟 / PLL</strong>(0x3014 INCK、0x3015 DATARATE):告诉传感器输入时钟多少、把 MIPI 输出锁到哪个速率——<em>全片最要命的两个</em>。</li>
+    <li><strong>模式 / 画幅</strong>(0x301b 合并模式、0x3022/23 AD/MD 位深、0x3040 lane 数):决定分辨率、12bit、4-lane。</li>
+    <li><strong>帧时序</strong>(HMAX 0x302c、VMAX 0x3028):一行多少个时钟、一帧多少行 → 决定帧率(74.25M÷HMAX÷VMAX)。</li>
+    <li><strong>曝光 / 增益</strong>(SHR 0x3050、gain 0x3070):快门和放大,由 ISP 的 AE 每帧动态写。</li>
+    <li><strong>模拟读出 / ADC / 校正</strong>(0x3Axx–0x47xx 那一大片,占了 ~300 条的绝大部分):像素放大器偏置、比较器阈值、ADC 斜坡、逐行读出时序、黑电平、列间串扰校正…… 这些几乎无法逐条读懂,是 Sony 针对这颗芯片的物理特性调出来的。</li>
+  </ul>
+  <p><strong>为什么一条都不能少?</strong>缺了模拟读出那片寄存器,传感器输出的原始帧本身就是坏的(噪声、错位、时序乱)——MIPI 收到也是垃圾。这正是<strong>必须从原厂固件完整搬、不能自己凑</strong>的原因:这些数字没有文档、也不该由我们发明。</p>
+</div>
+</div>
+
+<div class="phase" id="p4">
+<h2>Phase 04 · Root Cause</h2>
+<div class="phase-h"><span class="num">04</span> 大 Boss:看不见的时钟(MCLK)</div>
+<p>寄存器搬进去了,却依旧解不开:MIPI 四 lane 有流、phy 频率乱漂(222/296/446)、CRC/对齐爆表、<code>vc_frmnum=0</code>。三个版本的寄存器表全一个乱法。</p>
+<div class="sub">从运行中的原厂固件直接读寄存器</div>
+<p>让板子从 flash 启动原厂固件(正干净出图),telnet 进去用它的 <code>i2ctransfer</code> 读运行中寄存器:</p>
+<pre><code><span class="c"># 读寄存器 0xNNNN: 高字节 低字节 r1</span>
+i2ctransfer -y 3 w2@0x1a 0x30 0x14 r1   <span class="c"># → 0x01 (INCK_SEL)</span>
+i2ctransfer -y 3 w2@0x1a 0x30 0x15 r1   <span class="c"># → 0x04 (DATARATE)</span></code></pre>
+<div class="tw"><table>
+<tr><th>寄存器</th><th>原厂(工作)</th><th>我们</th><th>结论</th></tr>
+<tr><td>0x3014 INCK_SEL</td><td>0x01</td><td>0x01</td><td class="ok">同</td></tr>
+<tr><td>0x3015 DATARATE</td><td>0x04</td><td>0x04</td><td class="ok">同</td></tr>
+<tr><td>0x301b ADDMODE</td><td>0x00</td><td>0x00</td><td class="ok">同</td></tr>
+<tr><td>0x3040 LANEMODE</td><td>0x03</td><td>0x03</td><td class="ok">同</td></tr>
+<tr><td>HMAX 302c/d</td><td>0x044c=1100</td><td>0x044c</td><td class="ok">同</td></tr>
+<tr><td>VMAX 3028/9/a</td><td>0x08ca=2250*</td><td>同</td><td class="ok">同</td></tr>
+<tr><td class="dim">phy 频率实测</td><td class="ok">148 MHz</td><td class="bad">~296 MHz</td><td class="bad">2×</td></tr>
+</table></div>
+<div class="callout c-root">
+  <span class="tag">🔴 Root Cause · MCLK</span>
+  <p><strong>寄存器逐字节相同,输出速率却差 2 倍</strong> → 唯一变量是 <strong>SoC 喂给传感器的主时钟</strong>。传感器被 <code>INCK_SEL=0x01</code> 告知"输入=37.125MHz",而<strong>我们这颗 SoC 实际喂 74.25MHz</strong> → 内部 PLL 输出翻倍 → D-PHY 锁不住 → 满屏乱码。原厂那颗 SoC 喂的正是 37.125,故 0x01 对它对;我们照抄就翻车。之前读到的 296MHz 是 PHY 没锁时的噪声,真值就是原厂那个稳定的 148MHz。</p>
+</div>
+<div class="sub">修复:告诉传感器真实的时钟</div>
+<p>因为我们的 MCLK 是 74.25MHz,<code>INCK_SEL</code> 必须设 <code>0x00</code>(74.25),而不是照抄原厂的 0x01。</p>
+<div class="file">sony_imx678/imx678_sensor_ctl.c · imx678_linear_8m_init() <span class="why">时钟根因</span></div>
+<pre><code><span class="del">- imx678_write_register(vi_pipe, 0x3014, 0x1);  /* INCK 37.125 (照抄原厂,错) */</span>
+<span class="add">+ imx678_write_register(vi_pipe, 0x3014, 0x0);  /* INCK 74.25 = 本板 SoC 实际时钟 */</span></code></pre>
+<div class="callout c-win"><span class="tag">✅ 活体验证(不重编)</span><p><code>i2ctransfer -y 3 w3@0x1a 0x30 0x14 0x00</code> + 重启传感器 → phy <strong>296→148MHz</strong>、vc0=3840×2180 单通道、CRC 全 0、VI int_cnt 开始递增。固化后干净启动:mipi_rx 与原厂逐字节一致。</p></div>
+<p class="dim" style="font-size:13px;font-family:var(--mono)">* VMAX 会被 cmos 的 AE 按目标帧率覆写;74.25M/(HMAX1100×VMAX2250)=30fps,原厂 VMAX2700=25fps。</p>
+
+<div class="callout c-sci">
+  <span class="tag">🔬 科普</span>
+  <p class="h">为什么一个时钟位能让整幅图崩掉?</p>
+  <p>MIPI(CSI-2)是<strong>串行高速链路</strong>:传感器把像素数据在几条差分线上以每秒几亿位的速度串着发出去。接收端的 D-PHY 必须先<strong>"锁"住</strong>发送端的时钟节拍,才能在正确的时刻采样每一个比特。</p>
+  <p>传感器内部有个 <strong>PLL(锁相环)</strong>倍频器,输出速率 = 函数(输入时钟 INCK, 倍频设置)。你通过 <code>INCK_SEL</code> 告诉它"我的输入是 37.125MHz",它就按这个基准去倍频。可我们这颗 SoC 实际喂的是 <strong>74.25MHz(2 倍)</strong> → PLL 按错的基准算 → 输出速率翻倍 → 接收端 PHY 的采样节拍全对不上 → <strong>每个字节都读错 → CRC 全爆、满屏乱码</strong>。</p>
+  <p>这也解释了那个诡异现象:<strong>寄存器逐字节相同、结果却天差地别</strong>。因为"输入时钟到底多少"是 SoC 硬件决定的,不写在传感器寄存器里——只有把我们和原厂放一起对比,这个隐藏变量才现形。</p>
+</div>
+</div>
+
+<div class="phase" id="p5">
+<h2>Phase 05</h2>
+<div class="phase-h"><span class="num">05</span> 帧收到了却全丢:OB 高度</div>
+<p>MIPI 干净后:<code>int_cnt</code> 涨、<code>send_cnt=0 / lost_cnt≈int_cnt</code>,编码器一路 <code>get venc stream time out</code>。原厂 img_h=<strong>2180</strong>(2160 有效 + 20 行光学黑 OB),我们 =<strong>2184</strong>(OB=24)。传感器实发 2180,MIPI RX 却等 2184 → 帧凑不齐 → 全丢。</p>
+<div class="file">sample_comm_vi.c · sample_comm_vi_get_mipi_attr() <span class="why">画幅对齐传感器</span></div>
+<pre><code><span class="del">- ob_height = OB_HEIGHT_END;   /* = 24 → img_h 2184 */</span>
+<span class="add">+ ob_height = 20;              /* img_h = 2160+20 = 2180，与传感器实发一致 */</span></code></pre>
+<div class="callout c-warn"><span class="tag">⚠ 连环坑:ISP 裁剪要一致</span><p>改 OB=20 后 ISP 报 <code>isp_pub_wnd_rect_attr_check Invalid image y:24 height:2160</code>——裁剪窗口另一处还是 <code>y=24</code>,<code>24+2160=2184 &gt; 2180</code> 越界。OB 高度与 ISP 裁剪偏移<strong>必须相等</strong>。</p></div>
+<div class="file">sample_comm_isp.c · g_isp_pub_attr_imx515_mipi_8m_30fps <span class="why">裁剪 y 对齐 OB</span></div>
+<pre><code>  static ot_isp_pub_attr g_isp_pub_attr_imx515_mipi_8m_30fps = {
+<span class="del">-     {0, 24, 3840, 2160},   /* {x, y=OB偏移, w, h} */</span>
+<span class="add">+     {0, 20, 3840, 2160},</span></code></pre>
+<p>三处对齐(MIPI 2180 / ISP y=20 / 传感器 2180)→ 帧不丢,编出 <strong>33MB 有效 H.265 4K</strong>(NAL 头 <code>00 00 00 01 40 01</code>=VPS)+ 1080p H.264。</p>
+</div>
+
+<div class="phase" id="p6">
+<h2>Phase 06</h2>
+<div class="phase-h"><span class="num">06</span> 发紫的真凶:Bayer 排列</div>
+<p>画面结构完美但整体品红。干净对照:<span class="quote" style="display:inline;border:0;padding:0;margin:0;font-style:italic">同一 IR-Cut 滤镜、同场景 → 原厂正常,我们的紫。</span> 证明 <strong>100% 软件问题</strong>,与红外/硬件无关。</p>
+<div class="callout c-root"><span class="tag">🔴 Root Cause · Bayer/CFA</span><p>ISP 靠 Bayer 排列(RGGB/BGGR/GRBG/GBRG)重建颜色。我们的 pub attr 写的是 imx515 的 <code>GBRG</code>,而 IMX678 基准(无翻转,0x3030=0)是 <code>RGGB</code>。排列错位 → R/B 错位 → 系统性偏品红/紫。</p></div>
+<div class="file">sample_comm_isp.c · g_isp_pub_attr_imx515_mipi_8m_30fps <span class="why">颜色</span></div>
+<pre><code><span class="del">- OT_ISP_BAYER_GBRG,</span>
+<span class="add">+ OT_ISP_BAYER_RGGB,</span></code></pre>
+<p>一行,重编 → <strong>紫色消失,颜色全对</strong>。</p>
+<div class="callout c-sci">
+  <span class="tag">🔬 科普</span>
+  <p class="h">传感器是"色盲",颜色是拼出来的</p>
+  <p>传感器像素本身只能测<strong>光的强弱</strong>,分不出颜色。要出彩色,得在像素上盖一层<strong>马赛克滤色片(CFA / Bayer)</strong>:每个像素只透红或绿或蓝,按 2×2 的 <code>RGGB</code> 图案不断重复。所以传感器直接输出的原始帧(RAW)是一张<strong>马赛克灰度图</strong>。</p>
+  <p>ISP 再做<strong>去马赛克(demosaic)</strong>:根据每个像素的颜色 + 周围邻居,插值算出它缺的另外两个通道,还原成每像素完整 RGB。<strong>前提是 ISP 得知道这层马赛克的排列顺序。</strong></p>
+  <p>我们告诉它是 <code>GBRG</code>,实际是 <code>RGGB</code> → 它把红当蓝、蓝当红去插值 → 整幅图系统性地把颜色搬错位 = 品红/紫。改对一个枚举,ISP 就用对了排列,颜色瞬间归位。<strong>陷阱</strong>:传感器做镜像/翻转会让这个图案相位跟着变(RGGB→翻转→BGGR),所以设 Bayer 得连翻转状态一起算。</p>
+</div>
+<div class="callout c-warn"><span class="tag">⚠ 陷阱</span><p><strong>mirror/flip 会改变有效 Bayer 相位</strong>(RGGB 经 180°翻转→BGGR)。设 Bayer 须连翻转状态一起算。另:画面结构清晰 + CRC 全 0 + 检测宽度正好 3840,已排除 RAW12 打包/位深问题——偏色只可能在色彩平面。</p></div>
+</div>
+
+<div class="phase" id="p7">
+<h2>Phase 07</h2>
+<div class="phase-h"><span class="num">07</span> 管线出图 + 网页 App</div>
+<p>链路 <code>VI→ISP→VPSS→VENC</code> 通后的应用层坑:</p>
+<ul>
+<li><strong>sample_venc 是交互式的</strong>:<code>get_gop_mode/get_rc_mode</code> 等 stdin 选菜单,管道喂输入被吞、VENC 建不起来。硬编码为默认(NORMAL_P / CBR),并加 <code>setvbuf(stdout, TD_NULL, _IONBF, 0)</code> 才能实时看日志(否则管道全缓冲)。</li>
+<li>自写 <strong>MJPEG 网页服务</strong>(mode 13):复用 sys/vi/vpss init + 一路 <code>OT_PT_MJPEG</code> 绑 VPSS 1080p 小流 + socket。</li>
+<li>坑:没忽略 <strong>SIGPIPE</strong> → 浏览器断开时 <code>write()</code> 杀进程;单线程 MJPEG 长连接卡死 → 改<strong>快照刷新</strong>(每请求回一张 JPEG、短连接);缓冲满编码器停返回死图 → 每次<strong>清空缓冲取最新帧</strong>。</li>
+</ul>
+<div class="callout c-warn"><span class="tag">⚠ 编译/运行坑合集</span><p><code>#include</code> 加进文件头注释块(第1行 <code>/*</code>)会失效,须放文件中段;venc 收帧 API 是 <code>ss_mpi_venc_start_chn</code> 非 start_recv_frame;失败测试后 <code>ISP already inited 0xa01c800c</code> 需重启;<strong>对卡死的 ISP0_RUN 线程 rmmod ot_isp = use-after-free 内核 panic</strong>,每次启动只 <code>load -a</code> 一次。</p></div>
+</div>
+
+<div class="phase" id="build">
+<h2>Build</h2>
+<div class="phase-h">构建命令汇总</div>
+<div class="file">① 传感器库</div>
+<pre><code>export PATH=~/hi3519/SMP_Linux_GCC_musl/gcc-20240819-aarch64-v01c01-linux-musl/aarch64-v01c01-linux-musl-gcc/bin:$PATH
+cd $SRC/mpp/cbb/isp/user/sensor/hi3519dv500/sony_imx678
+make clean &amp;&amp; make          <span class="c"># → $SRC/out/lib/libsns_imx678.a (+ .so)</span></code></pre>
+<div class="file">② Sample(含 web mode 13)</div>
+<pre><code>cd $SRC/mpp/sample
+make clean
+make SENSOR0_TYPE=SONY_IMX678_MIPI_8M_30FPS_12BIT venc
+cp venc/sample_venc  $SRC/bsp/pub/rootfs_musl_arm64/root/   <span class="c"># NFS 即用</span></code></pre>
+<div class="file">③ 内核 + DTB(仅改了 DTS/RMII 时用)</div>
+<pre><code>cd $SRC/../open_source/linux/linux-5.10.y
+make ARCH=arm64 CROSS_COMPILE=aarch64-v01c01-linux-musl- dtbs
+cat arch/arm64/boot/uImage arch/arm64/boot/dts/vendor/hi3519dv500-demb-flash.dtb \
+    > arch/arm64/boot/uImage-fdt
+sudo cp arch/arm64/boot/uImage-fdt /srv/tftp/</code></pre>
+</div>
+
+<div class="phase" id="run">
+<h2>Run &amp; Verify</h2>
+<div class="phase-h">运行与验证命令</div>
+<div class="file">U-Boot NFS 启动(volatile,绝不 saveenv)</div>
+<pre><code>setenv serverip 192.168.1.50
+tftp 0x44000000 uImage-fdt
+sf probe 0 ; sf read 0x40010000 0x80000 0x10000
+setenv bootargs 'mem=384M console=ttyAMA0,115200 clk_ignore_unused root=/dev/nfs \
+  nfsroot=192.168.1.50:&lt;rootfs_musl_arm64路径&gt;,proto=tcp,nfsvers=3 rw \
+  ip=192.168.1.160:192.168.1.50:192.168.1.1:255.255.255.0::eth0:off mtdparts=sfc:...'
+ipcboot bl31 0x40010000 ; ipcboot uimgfdt 0x44000000</code></pre>
+<div class="file">板端:加载模块 + 跑(每次启动只 load 一次!)</div>
+<pre><code>cd /opt/ko
+./load3519dv500 -a -sensor0 imx678 -mmz_start 0x58200000 -mmz_size 600M
+cd /root ; ./sample_venc 13          <span class="c"># mode 13 = MJPEG 网页 :8080</span></code></pre>
+<div class="file">诊断:看流是否解开 / 帧是否交付</div>
+<pre><code>cat /proc/umap/mipi_rx    <span class="c"># phy 应 148MHz、vc0 单通道 3840×2180、CRC/对齐全 0</span>
+cat /proc/umap/vi         <span class="c"># send_cnt 应递增、lost_cnt≈0</span>
+i2ctransfer -y 3 w2@0x1a 0x30 0x14 r1   <span class="c"># 活体读传感器任意寄存器</span></code></pre>
+</div>
+
+<div class="phase" id="backup">
+<h2>Safety</h2>
+<div class="phase-h">固件备份 + 自动化</div>
+<div class="sub">整片 32MB 备份(字节精确,四重校验)</div>
+<pre><code>for i in 0 1 2 3 4 5 6; do cat /dev/mtd$i > mtd$i.bin; md5sum mtd$i.bin; done
+cat mtd0.bin ... mtd6.bin > full_flash_32MB.bin   <span class="c"># = 整片镜像</span></code></pre>
+<div class="tw"><table>
+<tr><th>分区</th><th>大小</th><th>MD5</th></tr>
+<tr><td>mtd0 boot(U-Boot)</td><td>448K</td><td class="dim">3d3aaa44…ceff92d</td></tr>
+<tr><td>mtd1 env</td><td>64K</td><td class="dim">c80ba073…279dcf</td></tr>
+<tr><td>mtd3 kernel</td><td>6M</td><td class="dim">4f7356fa…9acdf3a</td></tr>
+<tr><td>mtd4 rootfs</td><td>3M</td><td class="dim">1f5c12ce…d16bcb546</td></tr>
+<tr><td>mtd5 user(app)</td><td>21M</td><td class="dim">307d815c…57ecfc2</td></tr>
+<tr><td class="ok">full_flash</td><td class="ok">32M</td><td class="dim">00d806fb…cd5bb8f9</td></tr>
+</table></div>
+<p>校验:板端 md5 == Windows md5 · 分区拼接 == 整片 · 重读一致 · env 与旧备份一致。恢复:U-Boot <code>sf erase/write</code> 单分区,或 CH341A 夹片刷 full_flash。<strong>mtd0 不乱刷 = 砖不了。</strong></p>
+<div class="sub">一键开发(只加变量,不改 bootcmd)</div>
+<pre><code><span class="c"># U-Boot: 把 NFS 启动序列存成一个变量, saveenv</span>
+setenv nfsboot 'setenv serverip 192.168.1.50; tftp ...; ipcboot uimgfdt 0x44000000'
+saveenv
+<span class="c"># 默认仍启原厂固件(脱机可用); 开发时 Ctrl+C → run nfsboot</span></code></pre>
+<pre><code><span class="c"># nfsroot/etc/init.d/S99cam: 开机自动 load 模块 + 起 web</span>
+cd /opt/ko && ./load3519dv500 -a -sensor0 imx678 -mmz_start 0x58200000 -mmz_size 600M
+cd /root && setsid ./sample_venc 13 &amp;</code></pre>
+</div>
+
+<div class="phase" id="p8">
+<h2>Phase 08</h2>
+<div class="phase-h"><span class="num">08</span> 网页打不开:一个字段引发的「连接重置」</div>
+<p>传感器出图后做了个 MJPEG 网页预览(mode 13)。用户报:<strong>页面根本打不开、浏览器报「连接重置」,但直接访问 <code>/snap</code> 每次都能出图</strong>。服务器明明是活的。</p>
+<div class="callout c-root">
+  <span class="tag">🔴 Root Cause · RST</span>
+  <p><strong>HTML 响应没带 <code>Content-Length</code></strong>(只有 <code>Connection: close</code>)→ 浏览器要一直读到连接关闭为止。而代码 <code>read()</code> 只读了 299 字节请求就 <code>write()</code>+<code>close()</code>,<strong>socket 收缓冲里还压着没读完的浏览器请求头(几百字节~数KB)</strong> → 内核对「有未读数据就 close」的响应是发 <strong>RST 而非 FIN</strong> → 浏览器读 HTML 读到一半被重置。<br><code>/snap</code> 带了 Content-Length,浏览器读够就算完成,RST 来得再晚也不影响——<strong>所以只有它「看起来正常」</strong>。</p>
+</div>
+<div class="sub">两处都要修</div>
+<div class="file">sample_venc.c · web 模块 <span class="why">RST 根因</span></div>
+<pre><code><span class="c">// ① HTML 响应补上 Content-Length(g_web_html 改成纯 body,不再内嵌 HTTP 头)</span>
+<span class="add">+ snprintf(hh, sizeof(hh), "HTTP/1.0 200 OK\r\nContent-Type: text/html; charset=utf-8\r\n"
++          "Content-Length: %d\r\nConnection: close\r\n\r\n", (int)strlen(g_web_html));</span>
+
+<span class="c">// ② 关闭前排空未读请求数据,让内核发 FIN 而不是 RST</span>
+<span class="add">+ static void web_close(int fd) {
++     char tmp[512]; struct timeval tv = {0, 200000};
++     setsockopt(fd, SOL_SOCKET, SO_RCVTIMEO, &tv, sizeof(tv));
++     shutdown(fd, SHUT_WR);
++     while (read(fd, tmp, sizeof(tmp)) > 0) { }   /* drain */
++     close(fd);
++ }</span></code></pre>
+<div class="callout c-win"><span class="tag">✅ 不用板子就能验证</span><p>这段逻辑<strong>与 MPP 无关,纯 HTTP 收发框架</strong> → 抽出来在 x86 上 <code>gcc</code> 编译独立跑,用 python raw socket 测:<code>GET /</code> → 200 + Content-Length + 完整 body + <strong>无 reset</strong>;<strong>灌 4KB 超大请求头(模拟真实浏览器,超服务器读缓冲)→ 依然无 reset</strong>。真机复测一致。<br><b>心法:能脱离硬件验证的部分,就别占用宝贵的上板时间。</b></p></div>
+<div class="sub">顺手把预览做成真流</div>
+<p>老版实时预览是 <code>&lt;img src=/snap&gt;</code> + JS <code>onload→setTimeout→改src</code> 自刷新,时序不稳、卡顿。改成浏览器原生吃的 <strong>MJPEG 连续流</strong>(所有 IP 摄像机的标准招):</p>
+<pre><code><span class="c">// multipart/x-mixed-replace: 一条长连接里不断吐 JPEG</span>
+Content-Type: multipart/x-mixed-replace; boundary=frm
+--frm\r\nContent-Type: image/jpeg\r\nContent-Length: N\r\n\r\n&lt;jpeg&gt;</code></pre>
+<p>架构关键:<strong>VENC 的 <code>get_stream</code> 是单消费者</strong>,多个 HTTP 客户端不能各拉各的。做法是 <strong>1 个 reader 线程</strong>取流→最新帧存 <code>g_web_jpeg</code>[mutex],<strong>N 个 client 线程共享读</strong>——顺带根治了老版长连接卡死。实测 <strong>5 秒 72 帧 = 14.4fps</strong>(设计 <code>usleep(66000)</code>≈15fps,吻合)。</p>
+</div>
+
+<div class="phase" id="p9">
+<h2>Phase 09 · Root Cause</h2>
+<div class="phase-h"><span class="num">09</span> 二号 Boss:「图像叠在一起,慢慢变淡」</div>
+<p>网页能看直播了,但用户一句话点出新问题:<strong>「像是图像叠在一起 慢慢的变淡」</strong>。抓帧确认——运动的手臂拖出<strong>多层半透明残影</strong>,整幅画面<strong>发灰发朦、像蒙了层纱</strong>。而同一颗摄像头、同一张桌子,<strong>原厂固件拍出来锐利通透</strong>。硬件无罪,是我们的 ISP。</p>
+<div class="sub">从症状到嫌疑人</div>
+<p>「运动物体留下逐渐变淡的残影」= 典型的<strong>时域降噪(3DNR)把连续多帧混在一起</strong>。但为什么 3DNR 会疯成这样?笔记里其实早埋了一条线索——<em>「gain 地址存疑:cmos 用 0x3090,原厂/will127534 用 0x3070」</em>,当时判断「不阻碍 decode,先留」。<strong>它咬人了。</strong></p>
+<div class="sub">i2c 活体对质</div>
+<pre><code><span class="c"># 直接读跑着的传感器</span>
+0x3070/71 <span class="c">(IMX678 真 ANALOG_GAIN)</span> → <span class="bad">0x00 0x00 = 0</span>   <span class="c"># 从来没被写过!</span>
+0x3090/91 <span class="c">(我们在写的地址)</span>       → <span class="bad">0xf0 0x00 = 240</span> <span class="c"># 240×0.3dB = 72dB 顶格</span>
+0x3050-52 <span class="c">(SHR 曝光)</span>            → <span class="bad">8</span>            <span class="c"># 正好顶在代码下限</span></code></pre>
+<div class="callout c-root">
+  <span class="tag">🔴 Root Cause · GAIN 地址(imx515 残留)</span>
+  <p>和当初的 VMAX <code>0x3024→0x3028</code> 是<strong>同一类漏网之鱼</strong>——整套 cmos 抄自 imx515,<code>GAIN_PGC</code> 留着 imx515 的 <code>0x3090</code>,而 IMX678 的模拟增益在 <code>0x3070</code>。<br><strong>于是 AE 的增益指令全部写进了一个无效地址</strong>:房间暗 → AE 想加增益 → 写 0x3090 → 石沉大海,真增益永远是 0 → 画面还是暗 → AE 只剩一招:<strong>把曝光往死里拉</strong> → SHR 撞到下限 <code>min(max(value,8),…)</code> = <strong>≈48ms 超长曝光</strong> → 运动即拖影。</p>
+  <p class="h">为什么一个地址同时治好「重影」和「发朦」?</p>
+  <p>因为 <strong>ISP 的整条下游流水线是「增益感知」的</strong>。ISP <em>以为</em>增益开到了 240(72dB),就按「超高增益 = 噪点爆炸」来处理:<strong>3DNR 开到最猛</strong>(多帧混合 → 残影)、黑电平/DRC/色调曲线全按高增益补偿(→ 发灰发朦)。而传感器实际增益是 <strong>0</strong>——<strong>ISP 的认知和物理现实差了 72dB,整条链全错。</strong></p>
+</div>
+<div class="file">sony_imx678/imx678_cmos.c <span class="why">重影 + 发朦 根因</span></div>
+<pre><code><span class="del">- #define  IMX678_GAIN_PGC_L    0x3090    /* imx515 残留 */</span>
+<span class="del">- #define  IMX678_GAIN_PGC_H    0x3091</span>
+<span class="add">+ #define  IMX678_GAIN_PGC_L    0x3070    /* IMX678 真 ANALOG_GAIN (11bit: 低8 + 高3) */</span>
+<span class="add">+ #define  IMX678_GAIN_PGC_H    0x3071</span></code></pre>
+<div class="callout c-win"><span class="tag">✅ 结果</span><p>重编重跑后 i2c 实读:<code>0x3070 = 0x08 → 0x0a</code> <strong>随 AE 实时跳动</strong>(拿回控制权),<code>0x3090</code> 回落到出厂默认。抓帧对照:<strong>人脸/眼镜/手指/瓶子标签全部清晰、黑衣服是纯黑、肤色自然、零重影</strong>。</p></div>
+<div class="callout c-sci">
+  <span class="tag">🔬 心法</span>
+  <p class="h">「存疑但不阻碍,先留」的债,迟早要还</p>
+  <p>这个地址在笔记里被标记过<strong>两次</strong>「存疑」,每次都因为「当前不阻塞」被跳过。它没让链路断——<strong>它让链路带病工作</strong>,伪装成一个看起来完全不相干的画质问题(重影)。<br><strong>教训:「寄存器地址写错」不一定报错,它可能只是让某个反馈环路默默失效。</strong>AE 是个闭环——写坏它的执行端,它会用另一个旋钮(曝光)拼命补偿,于是故障从「增益不对」变形成「运动拖影」。<strong>顺着症状找因果链时,要敢于怀疑那些「早就标记过但一直没管」的东西。</strong></p>
+</div>
+</div>
+
+<div class="phase" id="p10">
+<h2>Phase 10</h2>
+<div class="phase-h"><span class="num">10</span> 自制 RTSP:440 行,一次点亮</div>
+<p>SDK 不带 RTSP,live555 太重。既然 VENC 已经吐标准 H.265/H.264 裸流,自己写一个极简 RTSP 更干净(musl 的 pthread 内建在 libc,连 <code>-lpthread</code> 都不用)。</p>
+<div class="tw"><table>
+<tr><th>要素</th><th>做法</th></tr>
+<tr><td>RTSP 控制(TCP 554)</td><td>thread-per-connection,实现 OPTIONS/DESCRIBE/SETUP/PLAY/TEARDOWN</td></tr>
+<tr><td>DESCRIBE</td><td>按 URL 路径 <code>/main</code>|<code>/sub</code> 选流,回 SDP(含从码流抓的 sprop-vps/sps/pps base64)</td></tr>
+<tr><td>SETUP</td><td>解析 <code>client_port=</code>,用 <code>getpeername</code> 拿客户端 IP 当 RTP 目的地</td></tr>
+<tr><td>RTP 打包</td><td>每流一个线程:<code>get_stream</code>→按 annex-b start code 切 NAL→单NAL≤1400直发,超了 FU 分片</td></tr>
+<tr><td class="dim">H.265 / H.264</td><td class="dim">FU type49(2字节头) / FU-A type28(1字节头);marker 打在 <code>is_frame_end</code> 的最后 NAL</td></tr>
+</table></div>
+<div class="callout c-win"><span class="tag">✅ 真机第一次跑就通</span><p><code>ffprobe rtsp://板/main</code> → <strong>hevc 3840×2160 25fps</strong>;<code>/sub</code> → <strong>h264 1920×1080 25fps</strong>。抓帧解码正确(4K 帧 632KB、锐利)。SDP、FU 分片重组、会话表全对。</p></div>
+<div class="callout c-sci">
+  <span class="tag">🔬 科普</span>
+  <p class="h">RTSP 本身不传视频</p>
+  <p>RTSP 只是个<strong>「遥控器」协议</strong>:DESCRIBE 问「你有什么流」(回 SDP)、SETUP 商量端口、PLAY 开始。<strong>真正扛视频的是 RTP</strong>——把 H.265 裸流按 NAL 切片、打上时间戳+序号,一包一包发。大帧超过 MTU 就 FU 分片,接收端按序号重组。<br><strong>这也是「浏览器为什么放不了 RTSP」的答案</strong>:浏览器没有 RTP 栈。所以原厂网页走的是另一条路——WebSocket 推流 + <code>ffmpeg.wasm</code> 在浏览器里软解(它 <code>webs/ws/</code> 里那个 2MB 的 wasm 就是干这个的)。</p>
+</div>
+<p class="dim" style="font-size:13px;font-family:var(--mono)">⚠ 已知缺口:只实现 UDP(RTP/AVP unicast)。客户端若请求 TCP interleaved,SETUP 仍回 UDP 的 Transport 行 → <code>Nonmatching transport</code>。VLC 走 TCP 时需在设置里取消「RTP over RTSP (TCP)」,或后续补 <code>interleaved=0-1</code> + RTP 包加 4 字节 <code>$</code> 头。</p>
+</div>
+
+<div class="phase" id="p11">
+<h2>Phase 11</h2>
+<div class="phase-h"><span class="num">11</span> 固化:把整台相机塞进 32MB flash</div>
+<p>板子<strong>没有 SD 卡槽、eMMC 空焊</strong> → 唯一存储就是板载 32MB SPI NOR。目标:脱离 NFS/VM/网络,插电自启。</p>
+<div class="sub">先算账:塞不塞得下</div>
+<div class="tw"><table>
+<tr><th>分区</th><th>容量</th><th>放什么</th><th>实际</th></tr>
+<tr><td>mtd3 kernel</td><td>6.00 MB</td><td>gziphead 压缩内核</td><td class="ok">5.57 MB</td></tr>
+<tr><td>mtd4 rootfs</td><td>3.00 MB</td><td>jffs2(busybox+musl+init)</td><td class="ok">2.62 MB</td></tr>
+<tr><td>mtd5 user</td><td>21.00 MB</td><td><strong>squashfs</strong>(ko+app+库)</td><td class="ok">3.46 MB</td></tr>
+</table></div>
+<div class="callout c-win"><span class="tag">✅ 意外收获:35MB 的 .so 一个都不用装</span><p><code>readelf -d sample_venc</code> → NEEDED 只有 <strong>libstdc++.so.6 / libgcc_s.so.1 / libc.so</strong>。<strong>MPP 全是静态 <code>.a</code> 链进程序了</strong>(<code>MPI_LIBS := libss_mpi.a …</code> 共 82 个),<code>out/lib</code> 里那 87 个 <code>.so</code>/35MB 是另一套动态版,<strong>我们压根没用</strong>。<br>于是 squashfs 只装:<strong>ko(11M) + sample_venc(3.2M) + 那两个库(2M) = 16M → XZ 压成 3.46MB</strong>,21MB 的分区只用了 1/6。</p></div>
+<div class="sub">比原厂更好的一招:squashfs 直挂</div>
+<p>原厂是「<code>app.tar.gz</code> 开机解压到内存」(费 RAM、费时间)。我们的内核已带 <code>CONFIG_SQUASHFS_XZ=y</code> → 直接把 app 分区做成 <strong>squashfs,开机从 flash 只读挂载</strong>:不解压、不占内存、瞬间挂上。</p>
+<pre><code><span class="c"># jffs2 根里的 /etc/init.d/S99cam</span>
+mount -t squashfs /dev/mtdblock5 /opt
+export LD_LIBRARY_PATH=/opt/lib
+cd /opt/ko && ./load3519dv500 -a -sensor0 imx678 -mmz_start 0x58200000 -mmz_size 600M
+cd /opt/bin && setsid ./sample_venc 13 &amp;</code></pre>
+<div class="callout c-warn">
+  <span class="tag">🐞 坑 1 · rugzip 不认我们的包</span>
+  <p>原厂 bootcmd 用私有命令 <code>rugzip</code> 解压 mtd3。我们照着 SDK 的 <code>kernel_compress.sh</code> 造了<strong>逐字段同构</strong>的 gziphead 包(<code>[压缩后大小4B][原始大小4B]["gziphead"8B]+gzip流</code>),连 <code>XFL</code> 字节都对齐成 <code>0x00</code>,<strong>rugzip 依旧 <code>decompress file failed</code></strong>(原因至今不明)。<br><strong>绕开它</strong>:我们的 gzip 流被标准 <code>gunzip -t</code> 验证完全有效 → 改用 U-Boot 自带的标准 <code>unzip</code>,一次成功。</p>
+  <pre><code><span class="c"># 新 bootcmd(0x50000010 = 跳过我们那 16 字节 gziphead 头)</span>
+sf probe 0; sf read 0x40010000 0x80000 0x10000;
+sf read 0x50000000 0x90000 0x600000; <span class="add">unzip 0x50000010 0x44000000</span>;
+ipcboot bl31 0x40010000; ipcboot uimgfdt 0x44000000</code></pre>
+</div>
+<div class="callout c-warn">
+  <span class="tag">🐞 坑 2 · <code>No working init found</code></span>
+  <p>内核起来了、jffs2 根也挂上了(<code>VFS: Mounted root … on device 31:4</code>),却挨个试 <code>/sbin/init</code>、<code>/bin/sh</code> 全「跑不起来」→ panic。<br><strong>因为打包 jffs2 时手动枚举目录 <code>for D in bin sbin etc lib64</code>,漏了 <code>/lib</code></strong> —— busybox 的解释器正是 <code>/lib/ld-musl-aarch64.so.1</code>(→<code>/lib64/libc.so</code>)。<strong>加载器没了,busybox 就是块砖:文件都在,但一个也执行不了。</strong></p>
+  <p><strong>修法与心法</strong>:别手动枚举,<strong>整根 rsync 只排除大块头</strong>(<code>--exclude=/root/*** /usr/lib/*** /opt/***</code>),并逐项自检 <code>lib/ld-musl</code>、<code>bin/sh</code>、<code>sbin/init</code>、<code>/init</code>、<code>/linuxrc</code>。<br>⚠ 自检还有个陷阱:<code>readlink -f</code> 解析<strong>绝对</strong>符号链接时是按<strong>宿主机</strong>的根解析的,会给出假象(显示 <code>/usr/lib64/libc.so</code> 那种根本不在包里的路径)。要用脚本<strong>在 staging 内部模拟解析</strong>才作数。</p>
+</div>
+<div class="sub">安全边界:为什么这不是赌博</div>
+<p>用户在爱尔兰、<strong>没有编程器</strong>——一旦砖了没硬件可救。但这套操作<strong>可逆</strong>,靠一条铁律:</p>
+<div class="callout c-win"><span class="tag">🛟 永不写 mtd0(U-Boot) / mtd2(bl31)</span><p><strong>只要 U-Boot 活着,板子就永远能救</strong>:它不依赖任何其他分区就能起到串口命令行,然后 <code>tftp</code> + <code>sf write</code> 刷回任意分区。我们所有写入偏移 <strong>≥ 0x90000</strong>,距 U-Boot 末尾(0x70000)隔着 9MB。<br><strong>交叉验证偏移表</strong>:七个分区的「偏移算出的大小」与「dump 出来的备份文件实际字节数」<strong>逐个精确吻合</strong>——偏移不是猜的。<br><strong>写前必校验</strong>:U-Boot 没有 <code>md5sum</code> 就用 <code>crc32 &lt;addr&gt; &lt;len&gt;</code> 对一遍再 <code>sf write</code>。TFTP 重传再凶也无所谓——错一个 bit,CRC 立刻露馅。</p></div>
+<div class="callout c-win"><span class="tag">✅ 成果:整机只读,天生耐拔电</span><p><code>/ = jffs2(ro)</code> · <code>/opt = squashfs(ro)</code> · <code>/tmp = tmpfs(RAM)</code> → <strong>没有一处可写文件系统</strong> → 随便拔电,不可能损坏、不用 fsck。这正是 IPC 该有的设计。</p></div>
+</div>
+
+<div class="phase" id="p12">
+<h2>Phase 12 · Root Cause</h2>
+<div class="phase-h"><span class="num">12</span> 隐藏 Boss:整晚的网络鬼故事</div>
+<p>这一晚一半的时间耗在网络上:VM 时通时断、TFTP 从 1.5MB/s 崩到 <strong>83KB/s</strong> 满屏 <code>T</code>、板子「ping 得通」却连不上……看起来像三四个独立故障,其实是<strong>两个根因</strong>。</p>
+<div class="callout c-root">
+  <span class="tag">🔴 根因 A · 板子直连网口 = 整个网段的命门</span>
+  <p>板子<strong>直连电脑网口</strong>(无交换机),而 <strong>VM 的 ens37 桥接在这块网卡上</strong>。于是:<br><strong>板子一崩/一重启/一断电 → 主机网口失去链路对端 → Windows 把 <code>192.168.1.2</code> 标记 <code>Deprecated</code>、撤掉 1.x 路由 → VM(1.50) 瞬间失联</strong>,发往 1.x 的包改走 WiFi 默认路由 → ISP 回 <code>Destination net unreachable</code>。</p>
+  <p class="h">⚠ 附带陷阱:Windows 的 ping 会骗人</p>
+  <p><strong><code>ping</code> 收到 ISP 的「不可达」应答也算成功(exit 0)</strong> → 脚本里的 <code>ping && echo 通</code> <strong>多次误判「板子活着」</strong>,把排查带进沟里。<strong>判断可达性必须看应答内容,不能只看 exit code。</strong></p>
+</div>
+<div class="callout c-root">
+  <span class="tag">🔴 根因 B · 第二块桥接网卡 = 帧重复</span>
+  <p>VM 上多挂了一块桥接 WiFi 的 <code>ens33</code> → <strong>同一个帧被投递进 VM 两次</strong>。tcpdump 铁证:同一个 ICMP 回复相隔 <strong>1 微秒</strong>出现两遍(真的网络环路要绕一圈,至少差毫秒 → <strong>说明是本地重复投递,不是环路</strong>)。<br><strong>为什么专杀 TFTP</strong>:TFTP 是 UDP、发一块等一个 ACK 的<strong>死板 lockstep</strong>,重复 ACK 会触发经典的<strong>「魔法师学徒综合症」</strong>——服务器被骗着重发、越滚越多 → 速度雪崩。<br><code>nmcli device disconnect ens33</code> 后 TFTP 立刻从 <strong>83KB/s 回到 1.5MB/s</strong>。⚠ NetworkManager 会把它自动拉回来(实测复发),要在 <strong>VMware 设置里移除那块适配器</strong>才根治。</p>
+</div>
+<div class="callout c-win"><span class="tag">✅ 心法</span><p><strong>开发期的板子天天崩,就别让主机网络的死活依赖它。</strong>两个免费解法:<strong>①给 VM 加一块 host-only 网卡当管理口</strong>(纯虚拟、不依赖物理链路 → 板子随便崩,SSH 永远在);<strong>②找个闲置旧路由器,LAN 口当交换机</strong>(板子和电脑各插一个)→ 主机链路永远 UP。<br><b>更普适的一条:当「好几个看似无关的故障」同时发作时,先怀疑它们共享同一个物理根因。</b></p></div>
+</div>
+
+<div class="phase" id="p13">
+<h2>Phase 13</h2>
+<div class="phase-h"><span class="num">13</span> 出图之后:从"传感器通了"到"一台成品相机"</div>
+<p>出图+固化只是起点。此后 <code>sample_venc.c</code> 一路长成了整台网络相机的<strong>唯一载体</strong>(单文件 ~5.4k 行):4K H265 /main + 1080p H264 /sub 双 RTSP、720p MJPEG 网页预览、4K 抓拍下载、IMX678 寄存器实时 I2C 直读、GPIO 监视、ISP 图像调节(持久化)、设 IP/网络、MMZ 内存显示、<strong>网页终端 /exec</strong>、<strong>dropbear SSH</strong> —— 全部 auth-gated,配置存在 <code>param</code>(mtd6)分区里跨重启保留。每一轮都用同一套"<strong>/tmp 冒烟 → 后台 mtdwrite → 回读 md5 → 重启验证</strong>"的固化法上 flash。</p>
+<div class="sub">4.3" DSI 屏:默认关,才敢固化未测的代码</div>
+<p>要给相机加一块本地 <strong>Waveshare 800×480 DSI 屏</strong>(走 SoC 的 VO + mipi_tx)。但屏在国内、人在欧洲 —— <strong>代码写好了却没硬件可测</strong>。破法是:<strong>集成进固件但默认关闭</strong>(<code>scr_en=0</code>),开屏只在网页手动启用时才碰 VO/mipi_tx/i2c → 未接屏也能安全烧进 flash,零副作用。已固化并重启验证:屏关闭时整机行为与之前逐字节一致,<code>0</code> 条 <code>[scr]</code> 日志。</p>
+<div class="callout c-win"><span class="tag">✅ 一个源喂两个消费者:屏不额外占 VPSS 通道</span><p>4 个 VPSS 物理通道已全被 venc 占满(4K/1080p/720p/4K抓拍)。但海思 <code>ss_mpi_sys_bind</code> 是<strong>按"目的地"键控</strong>的 —— 同一个 VPSS 源可以<strong>同时</strong>喂给 venc 和 VO。于是把 <strong>chn2(720p,本就在产帧)再 bind 到 VO</strong> 不破坏原有的 →venc2 绑定,VO 内部自己缩放到 800×480。省掉了一路多余的 VPSS。</p></div>
+<div class="callout c-warn"><span class="tag">🐞 坑 · Makefile 是 <code>wildcard *.c</code></span><p><code>venc/Makefile</code> 把目录里<strong>每个 <code>.c</code> 都当成一个独立可执行目标</strong>。所以屏驱动<strong>不能</strong>作为第二个 <code>.c</code> 丢进去(会去 build 一个没有 <code>main</code> 的 <code>dsi_panel_43</code> 而报错)→ 屏代码<strong>全部内联进 <code>sample_venc.c</code></strong>,原 <code>dsi_panel_43.c</code> 只留作参考。<br>另:那份"照规格写"的驱动<strong>逐字段拿 SDK 头核对</strong>才敢编 —— <code>sample_comm_vpss_bind_vo</code> 的签名是 <code>(grp,chn,vo_layer,vo_chn)</code> 不是注释里猜的 <code>(vo_dev,vo_layer)</code>;<code>pixel_clk</code> 单位是 <strong>Hz(27777000)不是 KHz</strong>;<code>ot_vo_sync_info</code> 的 18 个字段顺序按 <code>ot_common_vo_dev.h</code> 重排。<strong>屏的真实出图仍待回国接 J5 实测。</strong></p></div>
+<div class="callout c-win"><span class="tag">🛟 远程固化的安全网</span><p>没有编程器、人板隔着一块大陆,固化全靠三条:<strong>①永不写 U-Boot/kernel/rootfs(只动 mtd5 user + mtd6 param)</strong>;<strong>②rootfs 里的 <code>S90tcpsvd</code> 在 <code>S99cam</code> 之前起一个 23 端口后门 shell</strong> —— 它跑在 rootfs 上,不依赖 <code>/opt</code>,所以就算把 <code>/opt</code> 卸载/刷坏,shell 还在,能重刷;<strong>③写完先 <code>dd</code> 回读比 md5,一致才 <code>reboot</code></strong>。<code>mtdwrite</code> 擦 21MB 要约 1 分多钟,必须<strong>后台跑</strong>,别用短超时前台把它掐断。</p></div>
+</div>
+
+<div class="phase" id="diff">
+<h2>Δ Summary</h2>
+<div class="phase-h">改动总清单(5 文件)</div>
+<div class="tw"><table>
+<tr><th>文件</th><th>改动</th><th>解决</th></tr>
+<tr><td>sony_imx678/imx678_sensor_ctl.c</td><td>整套寄存器表(376条 pathA)· <span class="ok">0x3014 0x1→0x0</span></td><td>初始化 · <b class="bad">MCLK 根因</b></td></tr>
+<tr><td>sony_imx678/imx678_cmos.c</td><td>VMAX 地址 0x3024→<span class="ok">0x3028</span> · GAIN 地址 0x3090→<span class="ok">0x3070</span>(均为 imx515 残留)</td><td>AE 写对帧长 · <b class="bad">重影/发朦根因</b></td></tr>
+<tr><td>sample/common/sample_comm_vi.c</td><td>bus_id <span class="ok">3</span> · OB 24→<span class="ok">20</span></td><td>I2C 通 · 帧不丢</td></tr>
+<tr><td>sample/common/sample_comm_isp.c</td><td>裁剪 y 24→<span class="ok">20</span> · Bayer <span class="ok">GBRG→RGGB</span></td><td>画幅一致 · <b class="bad">颜色</b></td></tr>
+<tr><td>sample/venc/sample_venc.c</td><td>非交互化 · mode 13 网页(MJPEG流+双RTSP+4K抓拍+寄存器/GPIO/ISP/网络/终端/SSH,配置持久化)· <span class="ok">4.3" DSI 屏(默认关)</span> · mode 14 自制 RTSP<br><span class="dim">→ 已长成整台相机的唯一载体 ~5.4k 行</span></td><td>自动跑 · 成品化 · <b class="bad">连接重置</b> · 屏显</td></tr>
+</table></div>
+<div class="phase-h" style="margin-top:34px">四个根因,一条共性</div>
+<div class="tw"><table>
+<tr><th>#</th><th>症状</th><th>根因</th><th>藏在哪</th></tr>
+<tr><td class="dim">04</td><td>MIPI 全乱、CRC 爆</td><td>SoC 喂 74.25M,却告诉传感器 37.125</td><td class="bad">代码之外(物理时钟)</td></tr>
+<tr><td class="dim">06</td><td>整幅发紫</td><td>Bayer 相位 GBRG≠RGGB</td><td class="bad">抄 imx515 的参数</td></tr>
+<tr><td class="dim">09</td><td>运动重影 + 发朦</td><td>GAIN 写进无效地址 → AE 失控 → ISP 认知错 72dB</td><td class="bad">抄 imx515 的地址</td></tr>
+<tr><td class="dim">12</td><td>VM 失联 · TFTP 崩</td><td>板子直连网口(链路命门) + 第二块桥接网卡(帧重复)</td><td class="bad">代码之外(物理拓扑)</td></tr>
+</table></div>
+<div class="callout c-win"><span class="tag">✅ 心法</span>
+<p><strong>有"标准答案"就别猜</strong>——决定性突破(时钟、颜色、增益)都来自同一招:<strong>让原厂固件跑起来,从它身上读 ground truth,逼代码对齐</strong>。i2c 活体读寄存器是本项目最锋利的一把刀。</p>
+<p><strong>"寄存器一样、结果不同" = 变量在代码之外</strong>(时钟、拓扑这类物理层)。<strong>症状读进层次</strong>:CRC 错=物理层、帧全丢=尺寸时序、发紫但结构清晰=色彩平面、<strong>运动拖影=时域/曝光</strong>。</p>
+<p><strong>抄同门传感器要连地址一起怀疑</strong>——imx515 的残留一共咬了三次(VMAX、Bayer、GAIN)。<strong>"存疑但不阻碍,先留"的债迟早要还</strong>:写错的寄存器地址不一定报错,它可能只让某个闭环(AE)默默失效,再伪装成一个完全不相干的画质问题。</p>
+<p><strong>能脱离硬件验证的,就别占用上板时间</strong>(RST 那段在 x86 上就锤死了)。<strong>先备份、且校验</strong>;<strong>写 flash 前用 crc32 对一遍</strong>——传输再烂也不怕。<strong>永不写 U-Boot = 永远救得回来。</strong></p>
+</div>
+</div>
+
+<footer>
+  <p><b>Hi3519DV500 × Sony IMX678 · Reference Edition</b></p>
+  <p>关键判断——押中 Bayer、判断倒装是排线不够长、光学对焦——靠动手党的手感;代码只是把它们对上了。</p>
+  <p>后半程同理:一句<strong>「链接重置」</strong>锁定了 RST 根因,一句<strong>「图像叠在一起,慢慢变淡」</strong>顺藤摸到了写错的增益地址。<strong>把症状描述准,比读一万行代码管用。</strong></p>
+</footer>
+</div>

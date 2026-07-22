@@ -1,0 +1,10 @@
+#!/bin/sh
+mount -t squashfs /dev/mtdblock5 /opt 2>/dev/null
+if [ ! -x /opt/ko/load3519dv500 ]; then
+    echo "[S99cam] ERROR: squashfs(/dev/mtdblock5) mount failed"
+    exit 1
+fi
+export LD_LIBRARY_PATH=/opt/lib
+cd /opt/ko && ./load3519dv500 -a -sensor0 imx678 -mmz_start 0x58200000 -mmz_size 600M >/tmp/load.log 2>&1
+cd /opt/bin && setsid ./sample_venc 13 >/tmp/web.log 2>&1 &
+echo "[S99cam] flash boot OK: imx678 + web http://192.168.1.160:8080/"

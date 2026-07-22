@@ -1,0 +1,7 @@
+*.bak-*
+opt_build/
+src_changes/
+*.o
+*.tmp
+.DS_Store
+Thumbs.db

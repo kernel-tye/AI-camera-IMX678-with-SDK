@@ -1,0 +1,6 @@
+#!/bin/sh
+sleep 1
+if ! ifconfig eth0 2>/dev/null | grep -q "inet addr"; then
+    ifconfig eth0 192.168.1.160 netmask 255.255.255.0 up
+    echo "[S85netfix] eth0 = 192.168.1.160 (static)"
+fi
