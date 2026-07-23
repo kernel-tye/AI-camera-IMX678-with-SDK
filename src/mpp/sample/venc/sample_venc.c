@@ -3584,6 +3584,11 @@ static int  g_af_ok = 0;
 static int  g_osd_focus_en = 0;    /* 把焦点值+对焦条叠到画面上(对焦时开, 默认关) */
 static int  g_focus_spot = 1;      /* 1=中心点对焦(默认) 0=全画幅平均 */
 static unsigned long long g_focus_peak = 0;  /* 对焦条峰值(缩放用) */
+/* NPU 目标检测 (YOLOv8, svp_acl). g_npu_en=配置开关; g_npu_interval=每N帧推一次 */
+static int  g_npu_en = 1;          /* Phase1: 默认开(开发验证); TODO Phase2 改默认0 + web 开关 */
+static int  g_npu_interval = 3;    /* 每 3 帧推理一次, 省 4×A55 负载 */
+static int  g_npu_ready = 0;       /* 运行时: NPU 初始化成功 */
+static int  g_npu_last_num = 0;    /* 最近一帧检测框数 (供 web 读取) */
 static pthread_mutex_t g_cfg_lock = PTHREAD_MUTEX_INITIALIZER;
 #define CAM_CFG_PATHS_N 3
 static const char *g_cfg_paths[CAM_CFG_PATHS_N] = { "/tmp/param/cam.conf", "/root/cam.conf", "/tmp/cam.conf" };
@@ -3615,10 +3620,12 @@ static void cam_cfg_save(void)
     if (f == TD_NULL) { return; }
     pthread_mutex_lock(&g_cfg_lock);
     fprintf(f, "user=%s\npass=%s\nrtsp_auth=%d\nip=%s\nmask=%s\ngw=%s\nluma=%d\ncontr=%d\nsatu=%d\nhue=%d\n"
-               "scr_en=%d\nscr_bright=%d\nscr_src=%d\nscr_lr=%d\nosd_en=%d\nosd_focus=%d\nfocus_spot=%d\n",
+               "scr_en=%d\nscr_bright=%d\nscr_src=%d\nscr_lr=%d\nosd_en=%d\nosd_focus=%d\nfocus_spot=%d\n"
+               "npu_en=%d\nnpu_interval=%d\n",
         g_cam_user, g_cam_pass, g_rtsp_auth_en, g_net_ip, g_net_mask, g_net_gw,
         g_isp_luma, g_isp_contr, g_isp_satu, g_isp_hue,
-        g_scr_en, g_scr_bright, g_scr_src, g_scr_lr, g_osd_en, g_osd_focus_en, g_focus_spot);
+        g_scr_en, g_scr_bright, g_scr_src, g_scr_lr, g_osd_en, g_osd_focus_en, g_focus_spot,
+        g_npu_en, g_npu_interval);
     pthread_mutex_unlock(&g_cfg_lock);
     fclose(f);
 }
@@ -3648,6 +3655,8 @@ static void cam_cfg_load(void)
         else if (!strncmp(line, "osd_en=", 7)) { g_osd_en = atoi(line + 7) ? 1 : 0; }
         else if (!strncmp(line, "osd_focus=", 10)) { g_osd_focus_en = atoi(line + 10) ? 1 : 0; }
         else if (!strncmp(line, "focus_spot=", 11)) { g_focus_spot = atoi(line + 11) ? 1 : 0; }
+        else if (!strncmp(line, "npu_en=", 7)) { g_npu_en = atoi(line + 7) ? 1 : 0; }
+        else if (!strncmp(line, "npu_interval=", 13)) { g_npu_interval = atoi(line + 13); if (g_npu_interval < 1) { g_npu_interval = 1; } }
     }
     pthread_mutex_unlock(&g_cfg_lock);
     fclose(f);
@@ -5345,6 +5354,207 @@ static void *rtsp_listen_thread(void *arg)
     return TD_NULL;
 }
 
+/* ===================== NPU 目标检测 (YOLOv8 via svp_acl) =====================
+ * 复用板载 NPU (ot_svp_npu.ko 已加载). 通过 VPSS 扩展通道(chn4, 绑 phys chn0)取
+ * 模型输入尺寸(640x640)的 YUV420SP 帧, 零拷贝喂给 NPU 推理, 解析内建 NMS 输出的
+ * ROI 框. Phase1: 只打印检测框到日志(不画框). 不动现有 4 个物理 venc 通道.
+ * common 胶水: sample_common_svp_npu.c + sample_common_svp_npu_model.c (已复制进本目录). */
+#include <sys/prctl.h>
+#include "ss_mpi_vpss.h"
+#include "ss_mpi_vb.h"
+#include "ss_mpi_sys_mem.h"
+#include "svp_acl.h"
+#include "svp_acl_rt.h"
+#include "sample_common_svp.h"
+#include "sample_common_svp_npu.h"
+#include "sample_common_svp_npu_model.h"
+
+#define NPU_EXT_CHN     4                     /* VPSS 扩展通道 (phys=4 之外, ext 4..7) */
+#define NPU_DEV_ID      0
+
+/* 模型路径: /tmp/model 优先(开发/tmp跑), 回退 /opt/model(固化后). 返回首个存在者. */
+static const char *cam_npu_model_path(void)
+{
+    static const char *cands[] = { "/tmp/model/yolov8.om", "/opt/model/yolov8.om" };
+    unsigned i;
+    for (i = 0; i < sizeof(cands) / sizeof(cands[0]); i++) {
+        if (access(cands[i], R_OK) == 0) { return cands[i]; }
+    }
+    return cands[1];   /* 都不在时报 /opt 路径便于日志定位 */
+}
+
+static char g_npu_num_name[] = "output0";     /* yolov8 ROI 计数张量名 */
+static char g_npu_roi_name[] = "output0_";    /* yolov8 ROI 坐标张量名 */
+static char g_npu_rpn_name[] = "rpn_data";    /* yolov8 阈值名 */
+static volatile int g_npu_stop = 0;
+static sample_svp_npu_task_info g_npu_task = {0};
+static sample_svp_npu_detection_info g_npu_det = {0};
+static ot_size g_npu_insize = {0};
+static void *g_npu_vb_virt = TD_NULL;
+static ot_vb_pool_info g_npu_vb_pool = {0};
+static ot_sample_svp_rect_info g_npu_rects = {0};   /* 最近一帧的检测框 (供 web 读) */
+static pthread_mutex_t g_npu_lock = PTHREAD_MUTEX_INITIALIZER;
+
+/* 初始化: acl init -> 载模型 -> 取输入分辨率 -> 建 dataset/task/work buf -> 设阈值.
+ * 失败按序回滚, 返回 -1. 全程非致命(相机不受影响). */
+static int cam_npu_init(void)
+{
+    td_s32 ret;
+    sample_svp_npu_threshold th;
+    const char *model_path = cam_npu_model_path();
+
+    ret = sample_common_svp_npu_acl_init("", NPU_DEV_ID);
+    if (ret != TD_SUCCESS) { printf("[npu] acl init failed %#x\n", ret); return -1; }
+
+    ret = sample_common_svp_npu_load_model(model_path, 0, TD_FALSE);
+    if (ret != TD_SUCCESS) { printf("[npu] load model %s failed %#x\n", model_path, ret); goto err_acl; }
+    printf("[npu] model = %s\n", model_path);
+
+    ret = sample_common_svp_npu_get_input_resolution(0, 0, &g_npu_insize);
+    if (ret != TD_SUCCESS) { printf("[npu] get input resolution failed %#x\n", ret); goto err_model; }
+    printf("[npu] model input = %ux%u\n", g_npu_insize.width, g_npu_insize.height);
+
+    g_npu_task.cfg.max_batch_num     = 1;
+    g_npu_task.cfg.dynamic_batch_num = 1;
+    g_npu_task.cfg.total_t           = 0;
+    g_npu_task.cfg.is_cached         = TD_FALSE;
+    g_npu_task.cfg.model_idx         = 0;
+
+    ret = sample_common_svp_npu_create_input(&g_npu_task);
+    if (ret != TD_SUCCESS) { printf("[npu] create input failed %#x\n", ret); goto err_model; }
+    ret = sample_common_svp_npu_create_output(&g_npu_task);
+    if (ret != TD_SUCCESS) { printf("[npu] create output failed %#x\n", ret); goto err_in; }
+    ret = sample_common_svp_npu_create_task_buf(&g_npu_task);
+    if (ret != TD_SUCCESS) { printf("[npu] create task buf failed %#x\n", ret); goto err_out; }
+    ret = sample_common_svp_npu_create_work_buf(&g_npu_task);
+    if (ret != TD_SUCCESS) { printf("[npu] create work buf failed %#x\n", ret); goto err_taskbuf; }
+
+    /* yolov8 阈值: {nms=0.9, score=0.15, min_h=1, min_w=1, "rpn_data"} */
+    th.nms_threshold = 0.9f; th.score_threshold = 0.15f;
+    th.min_height = 1.0f; th.min_width = 1.0f; th.name = g_npu_rpn_name;
+    ret = sample_common_svp_npu_set_threshold(&th, 1, &g_npu_task);
+    if (ret != TD_SUCCESS) { printf("[npu] set threshold failed %#x\n", ret); goto err_workbuf; }
+
+    g_npu_det.num_name = g_npu_num_name;
+    g_npu_det.roi_name = g_npu_roi_name;
+    g_npu_det.has_background = TD_FALSE;
+    g_npu_det.roi_offset = 0;
+    return 0;
+
+err_workbuf: (td_void)sample_common_svp_npu_destroy_work_buf(&g_npu_task);
+err_taskbuf: (td_void)sample_common_svp_npu_destroy_task_buf(&g_npu_task);
+err_out:     (td_void)sample_common_svp_npu_destroy_output(&g_npu_task);
+err_in:      (td_void)sample_common_svp_npu_destroy_input(&g_npu_task);
+err_model:   (td_void)sample_common_svp_npu_unload_model(0);
+err_acl:     (td_void)sample_common_svp_npu_acl_deinit(NPU_DEV_ID);
+    return -1;
+}
+
+/* 建 VPSS 扩展通道 chn4: 绑 phys chn0(4K主), TAIL, 缩到模型输入尺寸, YUV420SP, depth=1. */
+static int cam_npu_ext_chn_start(void)
+{
+    ot_vpss_ext_chn_attr ext;
+    td_s32 ret;
+    (td_void)memset_s(&ext, sizeof(ext), 0, sizeof(ext));
+    ext.bind_chn      = 0;
+    ext.src_type      = OT_EXT_CHN_SRC_TYPE_TAIL;
+    ext.width         = g_npu_insize.width;
+    ext.height        = g_npu_insize.height;
+    ext.depth         = 1;
+    ext.video_format  = OT_VIDEO_FORMAT_LINEAR;
+    ext.dynamic_range = OT_DYNAMIC_RANGE_SDR8;
+    ext.pixel_format  = OT_PIXEL_FORMAT_YVU_SEMIPLANAR_420;
+    ext.compress_mode = OT_COMPRESS_MODE_NONE;
+    ext.frame_rate.src_frame_rate = -1;
+    ext.frame_rate.dst_frame_rate = -1;
+    ret = ss_mpi_vpss_set_ext_chn_attr(0, NPU_EXT_CHN, &ext);
+    if (ret != TD_SUCCESS) { printf("[npu] set_ext_chn_attr failed %#x\n", ret); return -1; }
+    ret = ss_mpi_vpss_enable_chn(0, NPU_EXT_CHN);
+    if (ret != TD_SUCCESS) { printf("[npu] enable ext chn failed %#x\n", ret); return -1; }
+    return 0;
+}
+
+/* 推理线程: 取扩展通道帧 -> (每N帧) 零拷贝喂 NPU -> 推理 -> 解析 ROI -> 打印/缓存. */
+static void *cam_npu_thread(void *arg)
+{
+    ot_video_frame_info frame;
+    td_s32 ret;
+    int fno = 0;
+    (td_void)arg;
+    (td_void)prctl(PR_SET_NAME, "cam_npu", 0, 0, 0);
+    (td_void)svp_acl_rt_set_device(NPU_DEV_ID);   /* 本线程绑 NPU 设备 */
+
+    while (!g_npu_stop) {
+        ret = ss_mpi_vpss_get_chn_frame(0, NPU_EXT_CHN, &frame, 2000);
+        if (ret != TD_SUCCESS) { usleep(20000); continue; }
+        if ((++fno % g_npu_interval) != 0) {
+            (td_void)ss_mpi_vpss_release_chn_frame(0, NPU_EXT_CHN, &frame);
+            continue;
+        }
+        /* 首帧: 映射该帧所在 VB 池一次, 之后零拷贝 */
+        if (g_npu_vb_virt == TD_NULL) {
+            if (ss_mpi_vb_get_pool_info((ot_vb_pool)frame.pool_id, &g_npu_vb_pool) == TD_SUCCESS) {
+                g_npu_vb_virt = ss_mpi_sys_mmap(g_npu_vb_pool.pool_phy_addr, (td_u32)g_npu_vb_pool.pool_size);
+            }
+        }
+        if (g_npu_vb_virt != TD_NULL) {
+            td_u8 *virt = (td_u8 *)g_npu_vb_virt +
+                (frame.video_frame.phys_addr[0] - g_npu_vb_pool.pool_phy_addr);
+            td_u32 size = frame.video_frame.height * frame.video_frame.stride[0] * 3 / 2;
+            ret = sample_common_svp_npu_update_input_data_buffer_info(virt, size,
+                frame.video_frame.stride[0], 0, &g_npu_task);
+            if (ret == TD_SUCCESS) { ret = sample_common_svp_npu_model_execute(&g_npu_task); }
+            if (ret == TD_SUCCESS) {
+                ot_sample_svp_rect_info rects;
+                (td_void)memset_s(&rects, sizeof(rects), 0, sizeof(rects));
+                /* proc=show=frame -> 框坐标在模型输入(640)空间, Phase1 直接打印 */
+                if (sample_common_svp_npu_roi_to_rect(&g_npu_task, &g_npu_det,
+                        &frame, &frame, &rects) == TD_SUCCESS) {
+                    int i, n = rects.num;
+                    pthread_mutex_lock(&g_npu_lock);
+                    g_npu_rects = rects; g_npu_last_num = n;
+                    pthread_mutex_unlock(&g_npu_lock);
+                    if (n > 0) {
+                        printf("[npu] frame#%d detections=%d\n", fno, n);
+                        for (i = 0; i < n && i < 8; i++) {
+                            printf("   box%d (%d,%d)-(%d,%d)\n", i,
+                                rects.rect[i].point[0].x, rects.rect[i].point[0].y,
+                                rects.rect[i].point[2].x, rects.rect[i].point[2].y);
+                        }
+                    }
+                }
+            }
+        }
+        (td_void)ss_mpi_vpss_release_chn_frame(0, NPU_EXT_CHN, &frame);
+    }
+    return TD_NULL;
+}
+
+/* 启动 NPU 检测 (由 sample_venc_web 在所有通道就绪后调用, 受 g_npu_en 控制). 非致命. */
+static void cam_npu_start(void)
+{
+    pthread_t npu_th;
+    if (cam_npu_init() != 0) { printf("[npu] init failed -> detection disabled (camera unaffected)\n"); return; }
+    if (cam_npu_ext_chn_start() != 0) {
+        printf("[npu] ext chn failed -> detection disabled\n");
+        (td_void)sample_common_svp_npu_destroy_work_buf(&g_npu_task);
+        (td_void)sample_common_svp_npu_destroy_task_buf(&g_npu_task);
+        (td_void)sample_common_svp_npu_destroy_output(&g_npu_task);
+        (td_void)sample_common_svp_npu_destroy_input(&g_npu_task);
+        (td_void)sample_common_svp_npu_unload_model(0);
+        (td_void)sample_common_svp_npu_acl_deinit(NPU_DEV_ID);
+        return;
+    }
+    g_npu_ready = 1;
+    g_npu_stop = 0;
+    if (pthread_create(&npu_th, TD_NULL, cam_npu_thread, TD_NULL) != 0) {
+        printf("[npu] thread create failed\n"); g_npu_ready = 0; return;
+    }
+    printf("[npu] detection started (ext chn %d, %ux%u, every %d frames)\n",
+        NPU_EXT_CHN, g_npu_insize.width, g_npu_insize.height, g_npu_interval);
+}
+/* =================== end NPU =================== */
+
 /* unified: VI -> VPSS(3 chn) -> H265 4K + H264 1080p (RTSP :554) + MJPEG 720p preview (web :8080) */
 static td_s32 sample_venc_web(td_void)
 {
@@ -5468,6 +5678,9 @@ static td_s32 sample_venc_web(td_void)
 
     /* 若已保存"启用屏幕", 现在(通道都在产帧)开屏. 默认关闭 -> 通常跳过. 非致命. */
     if (g_scr_en) { cam_scr_start(); }
+
+    /* NPU 目标检测 (YOLOv8): 所有通道已就绪, 建扩展通道 + 起推理线程. 受 g_npu_en 控制. 非致命. */
+    if (g_npu_en) { cam_npu_start(); }
 
     /* web server :8080 in this thread */
     listen_fd = socket(AF_INET, SOCK_STREAM, 0);
