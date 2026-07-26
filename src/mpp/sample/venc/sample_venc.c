@@ -3262,6 +3262,7 @@ static const char g_web_html[] =
 "</header>"
 "<nav id=\"nav\">"
 "  <button class=\"on\" data-t=\"pv\">预览</button>"
+"  <button data-t=\"ai\">AI 检测</button>"
 "  <button data-t=\"img\">图像</button>"
 "  <button data-t=\"time\">时间</button>"
 "  <button data-t=\"rtsp\">RTSP</button>"
@@ -3289,6 +3290,45 @@ static const char g_web_html[] =
 "        <div class=\"msg\" id=\"pvmsg\"></div>"
 "      </div>"
 "    </div>"
+"    </div>"
+"  </section>"
+"  <section class=\"tab\" id=\"ai\">"
+"    <div class=\"card\"><h4>🤖 AI 目标检测（YOLOv8 · NPU）</h4>"
+"      <div style=\"text-align:center;margin-bottom:12px\"><img id=\"v3\" style=\"max-width:100%;border-radius:10px;transform:rotate(180deg);background:#000;border:1px solid var(--line)\" alt=\"live\"></div>"
+"      <div class=\"pvmini\">"
+"        <div class=\"pm\"><span>目标数</span><b id=\"ai_n\">--</b></div>"
+"        <div class=\"pm\"><span>推理耗时</span><b id=\"ai_ms\">--</b></div>"
+"        <div class=\"pm\"><span>NPU</span><b id=\"ai_rdy\">--</b></div>"
+"      </div>"
+"      <table class=\"regt\" style=\"margin-top:12px\"><thead><tr><th>#</th><th>类别</th><th>置信度</th><th>位置 x,y 尺寸</th></tr></thead>"
+"      <tbody id=\"aibody\"><tr><td colspan=\"4\" class=\"d\">等待检测…</td></tr></tbody></table>"
+"    </div>"
+"    <div class=\"card\"><h4>模型</h4>"
+"      <div class=\"fld\"><label>当前模型（切换约需 2 秒，检测会短暂中断）</label>"
+"        <select id=\"npu_model\"><option value=\"\">读取中…</option></select></div>"
+"      <div class=\"btnrow\"><button class=\"btn g\" onclick=\"switchModel()\">切换模型</button><button class=\"btn gray\" onclick=\"loadModels()\">刷新列表</button></div>"
+"      <div class=\"msg\" id=\"mdlmsg\"></div>"
+"      <small style=\"color:var(--mut)\">模型放 <code>/opt/model</code>（固化在 flash 里，重启还在）或 <code>/tmp/model</code>（临时试用，掉电即失）。.om 由 PC 端 ATC 工具从 ONNX/Caffe 转换生成，板子上转不了。</small>"
+"    </div>"
+"    <div class=\"card\"><h4>检测设置</h4>"
+"      <div class=\"sw\"><input type=\"checkbox\" id=\"npu_en\"><label for=\"npu_en\">启用 NPU 目标检测</label></div>"
+"      <div class=\"sw\"><input type=\"checkbox\" id=\"npu_draw\"><label for=\"npu_draw\">在画面上画框+类别（预览 / DSI 屏 / MJPEG 都可见）</label></div>"
+"      <div class=\"fld\"><label>推理间隔（每 N 帧推一次，越大越省 CPU）</label>"
+"        <select id=\"npu_iv\"><option value=\"1\">1 · 最快最耗</option><option value=\"2\">2</option><option value=\"3\">3 · 推荐</option><option value=\"5\">5</option><option value=\"10\">10 · 省电</option></select></div>"
+"      <div class=\"row\"><label>置信度门槛</label><input type=range min=10 max=90 step=5 value=35 id=npu_sc><span class=val id=npu_scv>35%</span></div>"
+"      <div class=\"row\"><label>重叠框合并</label><input type=range min=20 max=90 step=5 value=45 id=npu_nms><span class=val id=npu_nmsv>45%</span></div>"
+"      <div class=\"fld\"><label>只检测这些类别（挡掉牙刷马桶之类的误报）</label>"
+"        <select id=\"npu_preset\" onchange=\"presetCls()\">"
+"          <option value=\"\">全部 80 类</option>"
+"          <option value=\"0\">只看人</option>"
+"          <option value=\"0,1,2,3,5,7\">人 + 车（自行车/摩托/公交/卡车）</option>"
+"          <option value=\"0,1,2,3,5,7,14,15,16,17\">人 + 车 + 动物（鸟/猫/狗/马）</option>"
+"          <option value=\"0,15,16,24,26,39,41,63,67\">人 + 常见室内物品</option>"
+"        </select></div>"
+"      <div class=\"fld\"><label>自定义类别号（逗号分隔，留空=全部）</label><input type=\"text\" id=\"npu_cls\" placeholder=\"如 0,2,15,16\"></div>"
+"      <div class=\"btnrow\"><button class=\"btn g\" onclick=\"saveNpu()\">保存并生效</button></div>"
+"      <div class=\"msg\" id=\"aimsg\"></div>"
+"      <small style=\"color:var(--mut)\">模型 yolov8.om（COCO 80 类，含 NMS），输入 640×640 取自 VPSS 扩展通道，不占用 4 个编码通道。框画在 720p 预览通道；4K 主码流(RTSP)暂不画框。</small>"
 "    </div>"
 "  </section>"
 "  <section class=\"tab\" id=\"img\">"
@@ -3432,7 +3472,7 @@ static const char g_web_html[] =
 "  if(started)return;started=true;"
 "  $('v').src='/stream';pollInfo();"
 "  setInterval(function(){if($('sys').classList.contains('on'))pollInfo();else beat();if($('gpio').classList.contains('on'))pollGpio();},3000);"
-"  setInterval(function(){if($('time').classList.contains('on'))pollTime()},1000);"
+"  setInterval(function(){if($('time').classList.contains('on'))pollTime();if($('ai').classList.contains('on'))pollNpu()},1000);"
 "}"
 "/* tabs */"
 "document.querySelectorAll('#nav button').forEach(function(b){b.onclick=function(){"
@@ -3440,6 +3480,7 @@ static const char g_web_html[] =
 "  document.querySelectorAll('.tab').forEach(function(x){x.classList.remove('on')});$(b.dataset.t).classList.add('on');"
 "  if(b.dataset.t=='sys'){pollInfo();loadNet();}if(b.dataset.t=='time')pollTime();if(b.dataset.t=='rtsp')loadRtsp();if(b.dataset.t=='reg')pollReg();if(b.dataset.t=='gpio')pollGpio();if(b.dataset.t=='scr')loadScr();"
 "  if(b.dataset.t=='img'){$('v2').src='/stream?'+Date.now();loadOsd();}else{if($('v2'))$('v2').removeAttribute('src');fvStop();}"
+"  if(b.dataset.t=='ai'){$('v3').src='/stream?'+Date.now();loadNpu();loadModels();pollNpu();}else{if($('v3'))$('v3').removeAttribute('src');}"
 "};});"
 "/* preview */"
 "function snap(){fetch('/save').then(function(r){return r.text()}).then(function(t){msg('pvmsg',t)})}"
@@ -3513,6 +3554,30 @@ static const char g_web_html[] =
 "/* osd */"
 "function loadOsd(){fetch('/getosd').then(function(r){return r.json()}).then(function(j){$('osd_en').checked=!!j.en;if($('osd_focus'))$('osd_focus').checked=!!j.focus;if($('focus_spot'))$('focus_spot').checked=!!j.spot})['catch'](function(){})}"
 "function saveOsd(){fetch('/setosd?en='+($('osd_en').checked?1:0)+'&focus='+($('osd_focus').checked?1:0)+'&spot='+($('focus_spot').checked?1:0)).then(function(r){return r.text()}).then(function(t){msg('osdmsg',t)})['catch'](function(){msg('osdmsg','失败')})}"
+"/* ai detect */"
+"function loadNpu(){fetch('/npu').then(function(r){return r.json()}).then(function(j){"
+"  $('npu_en').checked=!!j.en;$('npu_draw').checked=!!j.draw;$('npu_iv').value=j.interval;"
+"  $('npu_sc').value=j.score;$('npu_scv').innerText=j.score+'%';$('npu_cls').value=j.cls||'';"
+"  $('npu_nms').value=j.nms;$('npu_nmsv').innerText=j.nms+'%';"
+"  $('npu_preset').value=(j.cls||'')})['catch'](function(){})}"
+"$('npu_sc').oninput=function(){$('npu_scv').innerText=$('npu_sc').value+'%'};"
+"$('npu_nms').oninput=function(){$('npu_nmsv').innerText=$('npu_nms').value+'%'};"
+"function presetCls(){$('npu_cls').value=$('npu_preset').value}"
+"function loadModels(){fetch('/models').then(function(r){return r.json()}).then(function(j){"
+"  var h='',L=j.list||[];for(var i=0;i<L.length;i++){h+='<option value=\"'+L[i].name+'\">'+L[i].name+' · '+L[i].kb+' KB · '+L[i].dir+'</option>'}"
+"  $('npu_model').innerHTML=h||'<option value=\"\">没找到 .om 模型</option>';$('npu_model').value=j.cur"
+"})['catch'](function(){msg('mdlmsg','读取模型列表失败')})}"
+"function switchModel(){var m=$('npu_model').value;if(!m)return;msg('mdlmsg','正在切换到 '+m+'…');"
+"  fetch('/setnpu?model='+encodeURIComponent(m)).then(function(r){return r.text()}).then(function(t){"
+"    setTimeout(function(){loadNpu();loadModels();pollNpu();msg('mdlmsg','已切换到 '+m)},2500)})['catch'](function(){msg('mdlmsg','切换失败')})}"
+"function saveNpu(){var u='/setnpu?en='+($('npu_en').checked?1:0)+'&draw='+($('npu_draw').checked?1:0)+'&interval='+$('npu_iv').value+'&score='+$('npu_sc').value+'&nms='+$('npu_nms').value+'&cls='+encodeURIComponent($('npu_cls').value);"
+"  msg('aimsg','正在应用…');fetch(u).then(function(r){return r.text()}).then(function(t){msg('aimsg',t);loadNpu()})['catch'](function(){msg('aimsg','失败')})}"
+"function pollNpu(){fetch('/npu').then(function(r){return r.json()}).then(function(j){"
+"  $('ai_n').innerText=j.n;$('ai_ms').innerText=(j.ms>0?j.ms+' ms':'--');"
+"  $('ai_rdy').innerText=j.ready?(j.en?'运行中':'已暂停'):(j.en?'启动中…':'关闭');"
+"  var h='',d=j.det||[];for(var i=0;i<d.length;i++){h+='<tr><td class=a>'+(i+1)+'</td><td>'+d[i].n+'</td>'"
+"    +'<td class=v>'+(d[i].s>=0?d[i].s+'%':'--')+'</td><td class=d>'+d[i].x+','+d[i].y+' · '+d[i].w+'×'+d[i].h+'</td></tr>'}"
+"  $('aibody').innerHTML=h||'<tr><td colspan=\"4\" class=\"d\">未检测到目标</td></tr>'})['catch'](function(){})}"
 "/* isp save + gpio */"
 "function imgSave(){fetch('/imgsave').then(function(r){return r.text()}).then(function(t){msg('imgmsg',t)})['catch'](function(){msg('imgmsg','保存失败')})}"
 "function pollGpio(){fetch('/gpio').then(function(r){return r.json()}).then(function(j){"
@@ -3585,10 +3650,17 @@ static int  g_osd_focus_en = 0;    /* 把焦点值+对焦条叠到画面上(对�
 static int  g_focus_spot = 1;      /* 1=中心点对焦(默认) 0=全画幅平均 */
 static unsigned long long g_focus_peak = 0;  /* 对焦条峰值(缩放用) */
 /* NPU 目标检测 (YOLOv8, svp_acl). g_npu_en=配置开关; g_npu_interval=每N帧推一次 */
-static int  g_npu_en = 1;          /* Phase1: 默认开(开发验证); TODO Phase2 改默认0 + web 开关 */
+static int  g_npu_en = 1;          /* 默认开(本机就叫 AI camera); web「AI检测」页可关 */
 static int  g_npu_interval = 3;    /* 每 3 帧推理一次, 省 4×A55 负载 */
+static int  g_npu_draw = 1;        /* 1=把框+类别画进画面(region overlay, 预览/屏幕/MJPEG 都可见) */
+static int  g_npu_score = 35;      /* 置信度门槛 %: 低于此值的框丢掉(模型自带 NMS 阈值 0.15 太松) */
+static char g_npu_cls[128] = "";   /* 类别白名单, 逗号分隔的 COCO 类别号; 空=全部要 */
+static int  g_npu_nms = 45;        /* NMS 交并比阈值 %: 越小合并越狠. 官方样例给 90 = 几乎不合并,
+                                    * 同一个人会出好几个重叠框, 所以默认收到 45 */
+static char g_npu_model[64] = "yolov8.om";   /* 当前模型文件名, 在 /tmp/model 或 /opt/model 里找 */
 static int  g_npu_ready = 0;       /* 运行时: NPU 初始化成功 */
 static int  g_npu_last_num = 0;    /* 最近一帧检测框数 (供 web 读取) */
+static int  g_npu_ms = 0;          /* 最近一次推理耗时 ms */
 static pthread_mutex_t g_cfg_lock = PTHREAD_MUTEX_INITIALIZER;
 #define CAM_CFG_PATHS_N 3
 static const char *g_cfg_paths[CAM_CFG_PATHS_N] = { "/tmp/param/cam.conf", "/root/cam.conf", "/tmp/cam.conf" };
@@ -3621,11 +3693,12 @@ static void cam_cfg_save(void)
     pthread_mutex_lock(&g_cfg_lock);
     fprintf(f, "user=%s\npass=%s\nrtsp_auth=%d\nip=%s\nmask=%s\ngw=%s\nluma=%d\ncontr=%d\nsatu=%d\nhue=%d\n"
                "scr_en=%d\nscr_bright=%d\nscr_src=%d\nscr_lr=%d\nosd_en=%d\nosd_focus=%d\nfocus_spot=%d\n"
-               "npu_en=%d\nnpu_interval=%d\n",
+               "npu_en=%d\nnpu_interval=%d\nnpu_draw=%d\nnpu_score=%d\nnpu_cls=%s\nnpu_nms=%d\n"
+               "npu_model=%s\n",
         g_cam_user, g_cam_pass, g_rtsp_auth_en, g_net_ip, g_net_mask, g_net_gw,
         g_isp_luma, g_isp_contr, g_isp_satu, g_isp_hue,
         g_scr_en, g_scr_bright, g_scr_src, g_scr_lr, g_osd_en, g_osd_focus_en, g_focus_spot,
-        g_npu_en, g_npu_interval);
+        g_npu_en, g_npu_interval, g_npu_draw, g_npu_score, g_npu_cls, g_npu_nms, g_npu_model);
     pthread_mutex_unlock(&g_cfg_lock);
     fclose(f);
 }
@@ -3657,6 +3730,11 @@ static void cam_cfg_load(void)
         else if (!strncmp(line, "focus_spot=", 11)) { g_focus_spot = atoi(line + 11) ? 1 : 0; }
         else if (!strncmp(line, "npu_en=", 7)) { g_npu_en = atoi(line + 7) ? 1 : 0; }
         else if (!strncmp(line, "npu_interval=", 13)) { g_npu_interval = atoi(line + 13); if (g_npu_interval < 1) { g_npu_interval = 1; } }
+        else if (!strncmp(line, "npu_draw=", 9)) { g_npu_draw = atoi(line + 9) ? 1 : 0; }
+        else if (!strncmp(line, "npu_score=", 10)) { g_npu_score = atoi(line + 10); if (g_npu_score < 1) { g_npu_score = 1; } if (g_npu_score > 99) { g_npu_score = 99; } }
+        else if (!strncmp(line, "npu_cls=", 8)) { snprintf(g_npu_cls, sizeof(g_npu_cls), "%s", line + 8); }
+        else if (!strncmp(line, "npu_nms=", 8)) { g_npu_nms = atoi(line + 8); if (g_npu_nms < 5) { g_npu_nms = 5; } if (g_npu_nms > 95) { g_npu_nms = 95; } }
+        else if (!strncmp(line, "npu_model=", 10)) { if (line[10] != '\0') { snprintf(g_npu_model, sizeof(g_npu_model), "%s", line + 10); } }
     }
     pthread_mutex_unlock(&g_cfg_lock);
     fclose(f);
@@ -3916,7 +3994,6 @@ static const unsigned char g_osd_font[13][16] = {
 #define BOX_Y 288          /* 6/15*720=288 */
 #define BOX_W 226          /* (10/17-7/17)*1280≈226 */
 #define BOX_H 144          /* (9/15-6/15)*720=144 */
-static int g_box_ready = 0;
 
 static int cam_osd_gidx(char c)
 {
@@ -3948,23 +4025,14 @@ static void cam_osd_blit(unsigned char *base, int stride, const char *ts, int of
     }
 }
 
-/* 画中心对焦框(空心矩形, 1px黑外圈+2px白边, 内部透明不挡画面) */
-static void cam_focusbox_draw(unsigned char *base, int stride, int w, int h)
-{
-    int r, c;
-    for (r = 0; r < h; r++) {
-        unsigned short *p = (unsigned short *)(base + r * stride);
-        for (c = 0; c < w; c++) {
-            int d = r;
-            if (h - 1 - r < d) { d = h - 1 - r; }
-            if (c < d) { d = c; }
-            if (w - 1 - c < d) { d = w - 1 - c; }
-            p[c] = (d == 0) ? 0x8000 : (d <= 2 ? 0xFFFF : 0x0000);
-        }
-    }
-}
+/* chn2(720p 预览)的合成图层: 时间戳/对焦条/对焦框/检测框全画在这一个全幅 region 里.
+ * MPP 的 overlay region 贴到同一个 venc 通道时不能互相重叠 —— 一个全幅 region 会把
+ * 别的 region 顶掉(实测: 加了全幅检测框图层后时间戳就没了), 所以 chn2 只用一层.
+ * 实现在后面的 NPU 模块(那边才有字体和检测框数据), 这里先声明. */
+static void cam_chn2_rgn_init(void);
+static void cam_chn2_draw(void);
 
-/* create overlay region 0 (OSD text, chn0+chn2 左上) + region 1 (对焦框, chn2 中心) */
+/* create overlay region 0 (OSD text, 只贴 chn0 主4K) + chn2 的全幅合成层 */
 static void cam_osd_init(void)
 {
     ot_rgn_attr ra;
@@ -3988,30 +4056,10 @@ static void cam_osd_init(void)
     ca.attr.overlay_chn.layer = 0;
     chn.mod_id = OT_ID_VENC; chn.dev_id = 0;
     chn.chn_id = 0; (td_void)ss_mpi_rgn_attach_to_chn(OSD_HANDLE, &chn, &ca);   /* main 4K H265 */
-    chn.chn_id = 2; (td_void)ss_mpi_rgn_attach_to_chn(OSD_HANDLE, &chn, &ca);   /* preview 720p MJPEG */
     g_osd_ready = 1;
-    printf("[osd] timestamp overlay up (chn0+chn2)\n");
+    printf("[osd] timestamp overlay up (chn0)\n");
 
-    /* region 1: 中心对焦框, 只贴预览通道 chn2(720p, 网页/DSI 屏看的那路) */
-    (td_void)memset_s(&ra, sizeof(ra), 0, sizeof(ra));
-    ra.type = OT_RGN_OVERLAY;
-    ra.attr.overlay.pixel_format = OT_PIXEL_FORMAT_ARGB_1555;
-    ra.attr.overlay.bg_color = 0x0000;
-    ra.attr.overlay.size.width = BOX_W;
-    ra.attr.overlay.size.height = BOX_H;
-    ra.attr.overlay.canvas_num = 2;
-    if (ss_mpi_rgn_create(BOX_HANDLE, &ra) == TD_SUCCESS) {
-        (td_void)memset_s(&ca, sizeof(ca), 0, sizeof(ca));
-        ca.is_show = TD_TRUE;
-        ca.type = OT_RGN_OVERLAY;
-        ca.attr.overlay_chn.point.x = BOX_X;
-        ca.attr.overlay_chn.point.y = BOX_Y;
-        ca.attr.overlay_chn.fg_alpha = 255;
-        ca.attr.overlay_chn.bg_alpha = 0;
-        ca.attr.overlay_chn.layer = 1;
-        chn.chn_id = 2; (td_void)ss_mpi_rgn_attach_to_chn(BOX_HANDLE, &chn, &ca);
-        g_box_ready = 1;
-    }
+    cam_chn2_rgn_init();   /* 预览通道的全幅合成层(时间戳+对焦+检测框都画这里) */
 }
 
 /* 画对焦条(黑底+白边框+按 frac 白填充), 让焦点值一眼可见峰化 */
@@ -4064,17 +4112,7 @@ static void cam_osd_update(void)
     }
     (td_void)ss_mpi_rgn_update_canvas(OSD_HANDLE);
 
-    /* 中心对焦框: 只在"点对焦 + 叠加开启"时显示; 否则清空 */
-    if (g_box_ready && ss_mpi_rgn_get_canvas_info(BOX_HANDLE, &ci) == TD_SUCCESS) {
-        base = (unsigned char *)ci.virt_addr;
-        stride = (int)ci.stride;
-        if (g_osd_focus_en && g_focus_spot) {
-            cam_focusbox_draw(base, stride, BOX_W, BOX_H);
-        } else {
-            (td_void)memset_s(base, (size_t)stride * ci.size.height, 0, (size_t)stride * ci.size.height);
-        }
-        (td_void)ss_mpi_rgn_update_canvas(BOX_HANDLE);
-    }
+    cam_chn2_draw();   /* 预览通道那一层(时间戳+对焦条+对焦框+检测框) */
 }
 
 static void *cam_osd_thread(void *arg)
@@ -4082,7 +4120,8 @@ static void *cam_osd_thread(void *arg)
     (td_void)arg;
     while (1) {
         cam_osd_update();
-        if (g_osd_focus_en) { usleep(250000); }   /* 对焦时 4Hz 刷, 便于看峰值 */
+        /* 对焦时看峰值、开检测时框要跟手 -> 5Hz; 平时 1Hz 够刷秒 */
+        if (g_osd_focus_en || (g_npu_en && g_npu_draw && g_npu_ready)) { usleep(200000); }
         else { sleep(1); }
     }
     return TD_NULL;
@@ -4767,6 +4806,11 @@ static void web_close(int fd)
     close(fd);
 }
 
+/* NPU 检测的接口定义在文件末尾的 NPU 模块里 (那边才有 g_npu_box), 这里先声明 */
+static void cam_http_npu(int fd);
+static void cam_http_setnpu(int fd, const char *req);
+static void cam_http_models(int fd);
+
 static void *web_client_thread(void *arg)
 {
     int fd = (int)(intptr_t)arg;
@@ -4795,6 +4839,8 @@ static void *web_client_thread(void *arg)
                    strstr(req, "GET /getscr") != TD_NULL || strstr(req, "GET /setscr") != TD_NULL ||
                    strstr(req, "GET /focus") != TD_NULL || strstr(req, "GET /getosd") != TD_NULL ||
                    strstr(req, "GET /setosd") != TD_NULL ||
+                   strstr(req, "GET /npu") != TD_NULL || strstr(req, "GET /setnpu") != TD_NULL ||
+                   strstr(req, "GET /models") != TD_NULL ||
                    strstr(req, "GET /exec") != TD_NULL) {
             if (!authed) {
                 cam_http_401(fd);
@@ -4840,6 +4886,12 @@ static void *web_client_thread(void *arg)
                 cam_http_getosd(fd);
             } else if (strstr(req, "GET /setosd") != TD_NULL) {
                 cam_http_setosd(fd, req);
+            } else if (strstr(req, "GET /models") != TD_NULL) {
+                cam_http_models(fd);
+            } else if (strstr(req, "GET /setnpu") != TD_NULL) {   /* 必须排在 /npu 和 /set 前 */
+                cam_http_setnpu(fd, req);
+            } else if (strstr(req, "GET /npu") != TD_NULL) {
+                cam_http_npu(fd);
             } else if (strstr(req, "GET /imgsave") != TD_NULL) {
                 cam_cfg_save();
                 cam_http_text(fd, "\xe5\xb7\xb2\xe4\xbf\x9d\xe5\xad\x98");
@@ -5360,6 +5412,8 @@ static void *rtsp_listen_thread(void *arg)
  * ROI 框. Phase1: 只打印检测框到日志(不画框). 不动现有 4 个物理 venc 通道.
  * common 胶水: sample_common_svp_npu.c + sample_common_svp_npu_model.c (已复制进本目录). */
 #include <sys/prctl.h>
+#include <dirent.h>
+#include <sys/stat.h>
 #include "ss_mpi_vpss.h"
 #include "ss_mpi_vb.h"
 #include "ss_mpi_sys_mem.h"
@@ -5372,28 +5426,394 @@ static void *rtsp_listen_thread(void *arg)
 #define NPU_EXT_CHN     4                     /* VPSS 扩展通道 (phys=4 之外, ext 4..7) */
 #define NPU_DEV_ID      0
 
-/* 模型路径: /tmp/model 优先(开发/tmp跑), 回退 /opt/model(固化后). 返回首个存在者. */
+#define NPU_MODEL_DIRS 2
+static const char * const g_npu_model_dirs[NPU_MODEL_DIRS] = { "/tmp/model", "/opt/model" };
+
+/* 模型路径: /tmp/model 优先(开发期临时试模型), 回退 /opt/model(固化在 flash 里的). */
 static const char *cam_npu_model_path(void)
 {
-    static const char *cands[] = { "/tmp/model/yolov8.om", "/opt/model/yolov8.om" };
-    unsigned i;
-    for (i = 0; i < sizeof(cands) / sizeof(cands[0]); i++) {
-        if (access(cands[i], R_OK) == 0) { return cands[i]; }
+    static char path[160];
+    int i;
+    for (i = 0; i < NPU_MODEL_DIRS; i++) {
+        (td_void)snprintf(path, sizeof(path), "%s/%s", g_npu_model_dirs[i], g_npu_model);
+        if (access(path, R_OK) == 0) { return path; }
     }
-    return cands[1];   /* 都不在时报 /opt 路径便于日志定位 */
+    /* 配置里的模型不在了(比如它原来在掉电即失的 /tmp/model): 挑一个存在的 .om 顶上,
+     * 免得重启后检测静默失效 */
+    for (i = 0; i < NPU_MODEL_DIRS; i++) {
+        DIR *dp = opendir(g_npu_model_dirs[i]);
+        struct dirent *de;
+        if (dp == TD_NULL) { continue; }
+        while ((de = readdir(dp)) != TD_NULL) {
+            size_t ln = strlen(de->d_name);
+            if (ln < 4 || strcmp(de->d_name + ln - 3, ".om") != 0) { continue; }
+            (td_void)snprintf(path, sizeof(path), "%s/%s", g_npu_model_dirs[i], de->d_name);
+            printf("[npu] 配置的 %s 找不到, 改用 %s\n", g_npu_model, path);
+            (td_void)snprintf(g_npu_model, sizeof(g_npu_model), "%s", de->d_name);
+            (td_void)closedir(dp);
+            return path;
+        }
+        (td_void)closedir(dp);
+    }
+    (td_void)snprintf(path, sizeof(path), "%s/%s", g_npu_model_dirs[NPU_MODEL_DIRS - 1], g_npu_model);
+    return path;      /* 一个都没有时报 /opt 路径便于日志定位 */
 }
 
-static char g_npu_num_name[] = "output0";     /* yolov8 ROI 计数张量名 */
-static char g_npu_roi_name[] = "output0_";    /* yolov8 ROI 坐标张量名 */
-static char g_npu_rpn_name[] = "rpn_data";    /* yolov8 阈值名 */
+/* ---------- Phase2: 检测结果存储 + 画到画面 (region overlay) ---------- */
+#define NPU_MAX_DET 16
+typedef struct {
+    int x0, y0, x1, y1;   /* 千分比坐标 (0..1000), 与分辨率无关, 任意通道/网页都能换算 */
+    int cls;              /* COCO 类别号, -1=未知 */
+    int score;            /* 置信度 0..100, -1=模型没给 */
+} cam_npu_box;
+static cam_npu_box g_npu_box[NPU_MAX_DET];
+static int g_npu_box_n = 0;
+static int g_npu_layout_logged = 0;
+static pthread_mutex_t g_npu_lock = PTHREAD_MUTEX_INITIALIZER;   /* 保护 g_npu_box / g_npu_box_n */
+/* 目标只在部分帧上被检出(实测约 1/5 帧), 直接跟着清会让框狂闪 ——
+ * 检出后保持 NPU_HOLD_MS 毫秒再清, 画面才稳. */
+#define NPU_HOLD_MS 600
+static unsigned long long g_npu_hit_ms = 0;
+
+/* COCO 80 类 (yolov8.om 的类别顺序) */
+static const char * const g_coco[80] = {
+    "person","bicycle","car","motorcycle","airplane","bus","train","truck","boat","traffic light",
+    "fire hydrant","stop sign","parking meter","bench","bird","cat","dog","horse","sheep","cow",
+    "elephant","bear","zebra","giraffe","backpack","umbrella","handbag","tie","suitcase","frisbee",
+    "skis","snowboard","sports ball","kite","baseball bat","baseball glove","skateboard","surfboard",
+    "tennis racket","bottle","wine glass","cup","fork","knife","spoon","bowl","banana","apple",
+    "sandwich","orange","broccoli","carrot","hot dog","pizza","donut","cake","chair","couch",
+    "potted plant","bed","dining table","toilet","tv","laptop","mouse","remote","keyboard","cell phone",
+    "microwave","oven","toaster","sink","refrigerator","book","clock","vase","scissors","teddy bear",
+    "hair drier","toothbrush"
+};
+static const char *cam_coco_name(int cls)
+{
+    if (cls >= 0 && cls < (int)(sizeof(g_coco) / sizeof(g_coco[0]))) { return g_coco[cls]; }
+    return "object";
+}
+/* 每类一个颜色 (ARGB1555, 最高位=不透明) */
+static const unsigned short g_det_color[8] = {
+    0x83E0, /* 绿 */ 0xFFE0, /* 黄 */ 0x83FF, /* 青 */ 0xFC1F, /* 品红 */
+    0xFE80, /* 橙 */ 0x801F, /* 蓝 */ 0xFFFF, /* 白 */ 0xFC00  /* 红 */
+};
+
+/* 8x16 1-bit font, ASCII 32..126 (DejaVuSansMono-Bold 14px) — 检测标签用.
+ * 与时间戳那张 13 字形表分开: 时间戳已固化验证过, 不动它. */
+static const unsigned char g_txt_font[95][16] = {
+  {0x00,0x00,0x00,0x00,0x00,0x00,0x00,0x00,0x00,0x00,0x00,0x00,0x00,0x00,0x00,0x00}, /*   */
+  {0x00,0x00,0x00,0x18,0x18,0x18,0x18,0x18,0x18,0x18,0x00,0x18,0x18,0x00,0x00,0x00}, /* ! */
+  {0x00,0x00,0x00,0x26,0x26,0x26,0x26,0x00,0x00,0x00,0x00,0x00,0x00,0x00,0x00,0x00}, /* " */
+  {0x00,0x00,0x00,0x1b,0x1a,0x12,0x7f,0x36,0x24,0xff,0x6c,0x6c,0x48,0x00,0x00,0x00}, /* # */
+  {0x00,0x00,0x08,0x08,0x3e,0x6a,0x68,0x7c,0x1e,0x0e,0x0a,0x6e,0x3c,0x08,0x08,0x00}, /* $ */
+  {0x00,0x00,0x00,0x70,0xd8,0xd8,0x73,0x0c,0x30,0x47,0x09,0x09,0x07,0x00,0x00,0x00}, /* % */
+  {0x00,0x00,0x00,0x3c,0x30,0x30,0x30,0x78,0x79,0xcd,0xcf,0x67,0x3f,0x00,0x00,0x00}, /* & */
+  {0x00,0x00,0x00,0x18,0x18,0x18,0x18,0x00,0x00,0x00,0x00,0x00,0x00,0x00,0x00,0x00}, /* ' */
+  {0x00,0x00,0x0c,0x0c,0x18,0x18,0x18,0x18,0x18,0x18,0x18,0x18,0x0c,0x0c,0x00,0x00}, /* ( */
+  {0x00,0x00,0x30,0x18,0x18,0x18,0x0c,0x0c,0x0c,0x0c,0x18,0x18,0x18,0x30,0x00,0x00}, /* ) */
+  {0x00,0x00,0x00,0x08,0x4a,0x3c,0x3c,0x4a,0x08,0x00,0x00,0x00,0x00,0x00,0x00,0x00}, /* * */
+  {0x00,0x00,0x00,0x00,0x18,0x18,0x18,0xff,0xff,0x18,0x18,0x18,0x00,0x00,0x00,0x00}, /* + */
+  {0x00,0x00,0x00,0x00,0x00,0x00,0x00,0x00,0x00,0x00,0x18,0x18,0x18,0x10,0x00,0x00}, /* , */
+  {0x00,0x00,0x00,0x00,0x00,0x00,0x00,0x00,0x3c,0x3c,0x00,0x00,0x00,0x00,0x00,0x00}, /* - */
+  {0x00,0x00,0x00,0x00,0x00,0x00,0x00,0x00,0x00,0x00,0x18,0x18,0x18,0x00,0x00,0x00}, /* . */
+  {0x00,0x00,0x00,0x02,0x06,0x06,0x04,0x0c,0x08,0x18,0x10,0x30,0x20,0x60,0x60,0x00}, /* / */
+  {0x00,0x00,0x00,0x3c,0x76,0x66,0x67,0x6f,0x6f,0x67,0x66,0x76,0x3c,0x00,0x00,0x00}, /* 0 */
+  {0x00,0x00,0x00,0x3c,0x7c,0x1c,0x1c,0x1c,0x1c,0x1c,0x1c,0x1c,0x7f,0x00,0x00,0x00}, /* 1 */
+  {0x00,0x00,0x00,0x3c,0x46,0x06,0x06,0x0e,0x0c,0x18,0x30,0x70,0x7e,0x00,0x00,0x00}, /* 2 */
+  {0x00,0x00,0x00,0x3c,0x46,0x06,0x06,0x1c,0x06,0x06,0x06,0x46,0x3c,0x00,0x00,0x00}, /* 3 */
+  {0x00,0x00,0x00,0x0e,0x1e,0x1e,0x36,0x66,0x66,0x7f,0x06,0x06,0x06,0x00,0x00,0x00}, /* 4 */
+  {0x00,0x00,0x00,0x7e,0x60,0x60,0x7c,0x46,0x06,0x07,0x06,0x46,0x3c,0x00,0x00,0x00}, /* 5 */
+  {0x00,0x00,0x00,0x1c,0x32,0x60,0x7c,0x76,0x63,0x63,0x63,0x76,0x3c,0x00,0x00,0x00}, /* 6 */
+  {0x00,0x00,0x00,0x7e,0x06,0x06,0x0e,0x0c,0x1c,0x18,0x18,0x38,0x30,0x00,0x00,0x00}, /* 7 */
+  {0x00,0x00,0x00,0x3c,0x66,0x66,0x66,0x3c,0x66,0x63,0x63,0x66,0x3c,0x00,0x00,0x00}, /* 8 */
+  {0x00,0x00,0x00,0x3c,0x66,0x66,0x66,0x67,0x67,0x3e,0x06,0x46,0x3c,0x00,0x00,0x00}, /* 9 */
+  {0x00,0x00,0x00,0x00,0x00,0x00,0x18,0x18,0x18,0x00,0x18,0x18,0x18,0x00,0x00,0x00}, /* : */
+  {0x00,0x00,0x00,0x00,0x00,0x00,0x18,0x18,0x18,0x00,0x18,0x18,0x18,0x10,0x00,0x00}, /* ; */
+  {0x00,0x00,0x00,0x00,0x00,0x03,0x0f,0x7c,0x60,0x78,0x0f,0x03,0x00,0x00,0x00,0x00}, /* < */
+  {0x00,0x00,0x00,0x00,0x00,0x7f,0x7f,0x00,0x00,0x7f,0x7f,0x00,0x00,0x00,0x00,0x00}, /* = */
+  {0x00,0x00,0x00,0x00,0x00,0x40,0x78,0x1e,0x07,0x1e,0x78,0x40,0x00,0x00,0x00,0x00}, /* > */
+  {0x00,0x00,0x00,0x3c,0x26,0x06,0x0e,0x1c,0x18,0x18,0x00,0x18,0x18,0x00,0x00,0x00}, /* ? */
+  {0x00,0x00,0x00,0x1e,0x62,0x43,0xcf,0xdb,0xd1,0xd1,0xdb,0xcf,0x40,0x33,0x1f,0x00}, /* @ */
+  {0x00,0x00,0x00,0x1c,0x1c,0x3c,0x34,0x36,0x66,0x7e,0x63,0x63,0xc3,0x00,0x00,0x00}, /* A */
+  {0x00,0x00,0x00,0x7e,0x66,0x67,0x66,0x7e,0x66,0x63,0x63,0x67,0x7e,0x00,0x00,0x00}, /* B */
+  {0x00,0x00,0x00,0x1e,0x30,0x70,0x60,0x60,0x60,0x60,0x70,0x30,0x1e,0x00,0x00,0x00}, /* C */
+  {0x00,0x00,0x00,0x7c,0x66,0x66,0x63,0x63,0x63,0x63,0x66,0x66,0x7c,0x00,0x00,0x00}, /* D */
+  {0x00,0x00,0x00,0x7f,0x60,0x60,0x60,0x7e,0x60,0x60,0x60,0x60,0x7f,0x00,0x00,0x00}, /* E */
+  {0x00,0x00,0x00,0x7f,0x60,0x60,0x60,0x7e,0x60,0x60,0x60,0x60,0x60,0x00,0x00,0x00}, /* F */
+  {0x00,0x00,0x00,0x1e,0x30,0x60,0x60,0x60,0x67,0x63,0x63,0x33,0x1e,0x00,0x00,0x00}, /* G */
+  {0x00,0x00,0x00,0x67,0x67,0x67,0x67,0x7f,0x67,0x67,0x67,0x67,0x67,0x00,0x00,0x00}, /* H */
+  {0x00,0x00,0x00,0x7e,0x18,0x18,0x18,0x18,0x18,0x18,0x18,0x18,0x7e,0x00,0x00,0x00}, /* I */
+  {0x00,0x00,0x00,0x3e,0x06,0x06,0x06,0x06,0x06,0x06,0x06,0x4e,0x3c,0x00,0x00,0x00}, /* J */
+  {0x00,0x00,0x00,0x63,0x66,0x6c,0x78,0x78,0x7c,0x6e,0x66,0x67,0x63,0x00,0x00,0x00}, /* K */
+  {0x00,0x00,0x00,0x70,0x70,0x70,0x70,0x70,0x70,0x70,0x70,0x70,0x7f,0x00,0x00,0x00}, /* L */
+  {0x00,0x00,0x00,0x67,0x77,0x77,0x7f,0x5b,0x5b,0x43,0x43,0x43,0x43,0x00,0x00,0x00}, /* M */
+  {0x00,0x00,0x00,0x63,0x73,0x73,0x73,0x7b,0x6b,0x6f,0x6f,0x67,0x67,0x00,0x00,0x00}, /* N */
+  {0x00,0x00,0x00,0x3c,0x66,0x67,0x63,0x63,0x63,0x63,0x67,0x66,0x3c,0x00,0x00,0x00}, /* O */
+  {0x00,0x00,0x00,0x7e,0x67,0x63,0x63,0x67,0x7e,0x60,0x60,0x60,0x60,0x00,0x00,0x00}, /* P */
+  {0x00,0x00,0x00,0x3c,0x66,0x67,0x63,0x63,0x63,0x63,0x67,0x66,0x3e,0x06,0x02,0x00}, /* Q */
+  {0x00,0x00,0x00,0x7c,0x66,0x66,0x67,0x66,0x7c,0x6e,0x66,0x67,0x63,0x00,0x00,0x00}, /* R */
+  {0x00,0x00,0x00,0x3c,0x62,0x60,0x70,0x7c,0x1e,0x07,0x07,0x46,0x3c,0x00,0x00,0x00}, /* S */
+  {0x00,0x00,0x00,0x7f,0x18,0x18,0x18,0x18,0x18,0x18,0x18,0x18,0x18,0x00,0x00,0x00}, /* T */
+  {0x00,0x00,0x00,0x63,0x63,0x63,0x63,0x63,0x63,0x63,0x63,0x66,0x3e,0x00,0x00,0x00}, /* U */
+  {0x00,0x00,0x00,0xe3,0x63,0x67,0x66,0x66,0x36,0x36,0x3c,0x3c,0x1c,0x00,0x00,0x00}, /* V */
+  {0x00,0x00,0x00,0xc1,0xc3,0xc3,0xdb,0xdb,0x5f,0x7f,0x77,0x76,0x66,0x00,0x00,0x00}, /* W */
+  {0x00,0x00,0x00,0xe3,0x66,0x36,0x3c,0x1c,0x1c,0x3c,0x36,0x66,0xe3,0x00,0x00,0x00}, /* X */
+  {0x00,0x00,0x00,0xe3,0x67,0x76,0x3e,0x3c,0x1c,0x18,0x18,0x18,0x18,0x00,0x00,0x00}, /* Y */
+  {0x00,0x00,0x00,0x7f,0x07,0x0e,0x0e,0x1c,0x38,0x38,0x70,0x70,0x7f,0x00,0x00,0x00}, /* Z */
+  {0x00,0x00,0x1c,0x18,0x18,0x18,0x18,0x18,0x18,0x18,0x18,0x18,0x18,0x1c,0x00,0x00}, /* [ */
+  {0x00,0x00,0x00,0x60,0x60,0x20,0x30,0x10,0x18,0x08,0x0c,0x0c,0x06,0x06,0x02,0x00}, /* \ */
+  {0x00,0x00,0x3c,0x0c,0x0c,0x0c,0x0c,0x0c,0x0c,0x0c,0x0c,0x0c,0x0c,0x3c,0x00,0x00}, /* ] */
+  {0x00,0x00,0x00,0x18,0x3c,0x76,0x63,0x00,0x00,0x00,0x00,0x00,0x00,0x00,0x00,0x00}, /* ^ */
+  {0x00,0x00,0x00,0x00,0x00,0x00,0x00,0x00,0x00,0x00,0x00,0x00,0x00,0x00,0x00,0xff}, /* _ */
+  {0x00,0x30,0x10,0x18,0x00,0x00,0x00,0x00,0x00,0x00,0x00,0x00,0x00,0x00,0x00,0x00}, /* ` */
+  {0x00,0x00,0x00,0x00,0x00,0x3e,0x46,0x07,0x3f,0x67,0x67,0x67,0x3f,0x00,0x00,0x00}, /* a */
+  {0x00,0x00,0x60,0x60,0x60,0x7e,0x76,0x63,0x63,0x63,0x63,0x76,0x7e,0x00,0x00,0x00}, /* b */
+  {0x00,0x00,0x00,0x00,0x00,0x1e,0x32,0x60,0x60,0x60,0x60,0x32,0x1e,0x00,0x00,0x00}, /* c */
+  {0x00,0x00,0x06,0x06,0x06,0x3e,0x66,0x66,0x66,0x66,0x66,0x66,0x3e,0x00,0x00,0x00}, /* d */
+  {0x00,0x00,0x00,0x00,0x00,0x3c,0x66,0x63,0x7f,0x60,0x60,0x71,0x3e,0x00,0x00,0x00}, /* e */
+  {0x00,0x00,0x0e,0x18,0x18,0x7e,0x18,0x18,0x18,0x18,0x18,0x18,0x18,0x00,0x00,0x00}, /* f */
+  {0x00,0x00,0x00,0x00,0x00,0x3f,0x67,0x67,0x67,0x67,0x67,0x67,0x3f,0x06,0x06,0x3c}, /* g */
+  {0x00,0x00,0x60,0x60,0x60,0x7e,0x76,0x66,0x66,0x66,0x66,0x66,0x66,0x00,0x00,0x00}, /* h */
+  {0x00,0x00,0x1c,0x1c,0x00,0x7c,0x1c,0x1c,0x1c,0x1c,0x1c,0x1c,0x7f,0x00,0x00,0x00}, /* i */
+  {0x00,0x00,0x0c,0x0c,0x00,0x3c,0x0c,0x0c,0x0c,0x0c,0x0c,0x0c,0x0c,0x0c,0x1c,0x78}, /* j */
+  {0x00,0x00,0x60,0x60,0x60,0x67,0x6e,0x7c,0x7c,0x7c,0x66,0x66,0x63,0x00,0x00,0x00}, /* k */
+  {0x00,0x00,0x78,0x18,0x18,0x18,0x18,0x18,0x18,0x18,0x18,0x18,0x0f,0x00,0x00,0x00}, /* l */
+  {0x00,0x00,0x00,0x00,0x00,0xfe,0xdb,0xdb,0xdb,0xdb,0xdb,0xdb,0xdb,0x00,0x00,0x00}, /* m */
+  {0x00,0x00,0x00,0x00,0x00,0x7e,0x76,0x66,0x66,0x66,0x66,0x66,0x66,0x00,0x00,0x00}, /* n */
+  {0x00,0x00,0x00,0x00,0x00,0x3c,0x66,0x67,0x63,0x63,0x67,0x66,0x3c,0x00,0x00,0x00}, /* o */
+  {0x00,0x00,0x00,0x00,0x00,0x7e,0x76,0x63,0x63,0x63,0x63,0x76,0x7e,0x60,0x60,0x60}, /* p */
+  {0x00,0x00,0x00,0x00,0x00,0x3e,0x66,0x66,0x66,0x66,0x66,0x66,0x3e,0x06,0x06,0x06}, /* q */
+  {0x00,0x00,0x00,0x00,0x00,0x3f,0x39,0x30,0x30,0x30,0x30,0x30,0x30,0x00,0x00,0x00}, /* r */
+  {0x00,0x00,0x00,0x00,0x00,0x3c,0x62,0x70,0x7c,0x1e,0x06,0x46,0x3c,0x00,0x00,0x00}, /* s */
+  {0x00,0x00,0x00,0x18,0x18,0x7e,0x18,0x18,0x18,0x18,0x18,0x18,0x1e,0x00,0x00,0x00}, /* t */
+  {0x00,0x00,0x00,0x00,0x00,0x66,0x66,0x66,0x66,0x66,0x66,0x66,0x3e,0x00,0x00,0x00}, /* u */
+  {0x00,0x00,0x00,0x00,0x00,0x63,0x66,0x66,0x36,0x36,0x3c,0x3c,0x1c,0x00,0x00,0x00}, /* v */
+  {0x00,0x00,0x00,0x00,0x00,0xc1,0xc3,0xdb,0x5b,0x7f,0x77,0x76,0x66,0x00,0x00,0x00}, /* w */
+  {0x00,0x00,0x00,0x00,0x00,0x67,0x36,0x3c,0x1c,0x1c,0x3c,0x76,0x67,0x00,0x00,0x00}, /* x */
+  {0x00,0x00,0x00,0x00,0x00,0x63,0x67,0x66,0x36,0x3e,0x3c,0x1c,0x1c,0x18,0x18,0x70}, /* y */
+  {0x00,0x00,0x00,0x00,0x00,0x7e,0x06,0x0e,0x1c,0x38,0x38,0x70,0x7e,0x00,0x00,0x00}, /* z */
+  {0x00,0x00,0x0e,0x18,0x18,0x18,0x18,0x18,0x70,0x18,0x18,0x18,0x18,0x18,0x0e,0x00}, /* { */
+  {0x00,0x00,0x18,0x18,0x18,0x18,0x18,0x18,0x18,0x18,0x18,0x18,0x18,0x18,0x18,0x18}, /* | */
+  {0x00,0x00,0x70,0x18,0x18,0x18,0x18,0x1c,0x0e,0x1c,0x18,0x18,0x18,0x18,0x78,0x00}, /* } */
+  {0x00,0x00,0x00,0x00,0x00,0x00,0x00,0x79,0x7f,0x0e,0x00,0x00,0x00,0x00,0x00,0x00}, /* ~ */
+};
+
+/* chn2(720p 预览 = 网页/MJPEG/DSI 屏那一路)的唯一叠加层, 整幅画布.
+ * 同一 venc 通道上的 overlay region 不能重叠, 所以时间戳/对焦/检测框都合并画在这里. */
+#define DET_HANDLE 2
+#define DET_W      1280
+#define DET_H      720
+#define DET_OX     16              /* 时间戳在画面里的左上角偏移(和原来 region 位置一致) */
+#define DET_OY     16
+#define DET_TXT_SCALE 2                    /* 8x16 字体放大 2 倍 = 16x32, 720p 上够看 */
+static int g_det_rgn_ready = 0;
+
+static void cam_det_px(unsigned char *base, int stride, int cw, int ch, int x, int y, unsigned short c)
+{
+    if (x < 0 || y < 0 || x >= cw || y >= ch) { return; }   /* 越界丢弃, 框贴边也安全 */
+    *((unsigned short *)(base + (long)y * stride) + x) = c;
+}
+
+/* 空心矩形: 从 (x0,y0)-(x1,y1) 往外长 th 像素粗 */
+static void cam_det_rect(unsigned char *base, int stride, int cw, int ch,
+    int x0, int y0, int x1, int y1, int th, unsigned short c)
+{
+    int i, t;
+    for (t = 0; t < th; t++) {
+        for (i = x0 - t; i <= x1 + t; i++) {
+            cam_det_px(base, stride, cw, ch, i, y0 - t, c);
+            cam_det_px(base, stride, cw, ch, i, y1 + t, c);
+        }
+        for (i = y0 - t; i <= y1 + t; i++) {
+            cam_det_px(base, stride, cw, ch, x0 - t, i, c);
+            cam_det_px(base, stride, cw, ch, x1 + t, i, c);
+        }
+    }
+}
+
+/* 写一行 ASCII 文本 (8x16 字体 × scale), 带画布裁剪 */
+static void cam_txt_blit(unsigned char *base, int stride, int cw, int ch,
+    int x, int y, const char *s, int scale, unsigned short color)
+{
+    int i, row, col, sy, sx;
+    for (i = 0; s[i] != '\0'; i++) {
+        int code = (unsigned char)s[i];
+        const unsigned char *gl;
+        if (code < 32 || code > 126) { code = 32; }
+        gl = g_txt_font[code - 32];
+        for (row = 0; row < 16; row++) {
+            unsigned char bits = gl[row];
+            if (bits == 0) { continue; }
+            for (col = 0; col < 8; col++) {
+                if (!(bits & (0x80 >> col))) { continue; }
+                for (sy = 0; sy < scale; sy++) {
+                    for (sx = 0; sx < scale; sx++) {
+                        cam_det_px(base, stride, cw, ch,
+                            x + (i * 8 + col) * scale + sx, y + row * scale + sy, color);
+                    }
+                }
+            }
+        }
+    }
+}
+
+/* 建 chn2 合成层 (handle 2, 整幅 720p, 贴 venc chn2). 非致命: 失败就只是没叠加. */
+static void cam_chn2_rgn_init(void)
+{
+    ot_rgn_attr ra;
+    ot_rgn_chn_attr ca;
+    ot_mpp_chn chn;
+    (td_void)memset_s(&ra, sizeof(ra), 0, sizeof(ra));
+    ra.type = OT_RGN_OVERLAY;
+    ra.attr.overlay.pixel_format = OT_PIXEL_FORMAT_ARGB_1555;
+    ra.attr.overlay.bg_color = 0x0000;          /* 透明 */
+    ra.attr.overlay.size.width = DET_W;
+    ra.attr.overlay.size.height = DET_H;
+    ra.attr.overlay.canvas_num = 2;
+    if (ss_mpi_rgn_create(DET_HANDLE, &ra) != TD_SUCCESS) { printf("[npu] det rgn_create fail\n"); return; }
+    (td_void)memset_s(&ca, sizeof(ca), 0, sizeof(ca));
+    ca.is_show = TD_TRUE;
+    ca.type = OT_RGN_OVERLAY;
+    ca.attr.overlay_chn.point.x = 0;
+    ca.attr.overlay_chn.point.y = 0;
+    ca.attr.overlay_chn.fg_alpha = 255;
+    ca.attr.overlay_chn.bg_alpha = 0;
+    ca.attr.overlay_chn.layer = 0;              /* chn2 上只有这一层, 不与别的 region 重叠 */
+    chn.mod_id = OT_ID_VENC; chn.dev_id = 0; chn.chn_id = 2;
+    if (ss_mpi_rgn_attach_to_chn(DET_HANDLE, &chn, &ca) != TD_SUCCESS) {
+        printf("[osd] chn2 rgn attach fail\n");
+        (td_void)ss_mpi_rgn_destroy(DET_HANDLE);
+        return;
+    }
+    g_det_rgn_ready = 1;
+    printf("[osd] chn2 overlay up (%dx%d: 时间戳+对焦+检测框)\n", DET_W, DET_H);
+}
+
+/* 重画 chn2 叠加层: 时间戳 + 焦点值/对焦条 + 中心对焦框 + 检测框. 由 OSD 线程单独调用
+ * (单一写者, 免得和推理线程抢 region 画布). 全清后重画, 关掉的项自然消失. */
+static void cam_chn2_draw(void)
+{
+    ot_rgn_canvas_info ci;
+    cam_npu_box b[NPU_MAX_DET];
+    unsigned char *base;
+    char buf[32];
+    int stride, i, n;
+    if (!g_det_rgn_ready) { return; }
+    pthread_mutex_lock(&g_npu_lock);
+    n = g_npu_box_n;
+    (td_void)memcpy_s(b, sizeof(b), g_npu_box, sizeof(g_npu_box));
+    pthread_mutex_unlock(&g_npu_lock);
+    if (ss_mpi_rgn_get_canvas_info(DET_HANDLE, &ci) != TD_SUCCESS) { return; }
+    base = (unsigned char *)ci.virt_addr;
+    stride = (int)ci.stride;
+    (td_void)memset_s(base, (size_t)stride * ci.size.height, 0, (size_t)stride * ci.size.height);
+
+    if (g_osd_en) {                                   /* 时间戳(和主码流那层同样式) */
+        time_t t = time(TD_NULL);
+        struct tm lt;
+        localtime_r(&t, &lt);
+        strftime(buf, sizeof(buf), "%Y-%m-%d %H:%M:%S", &lt);
+        cam_txt_blit(base, stride, DET_W, DET_H, DET_OX + 2, DET_OY + 2, buf, OSD_SCALE, 0x8000);
+        cam_txt_blit(base, stride, DET_W, DET_H, DET_OX, DET_OY, buf, OSD_SCALE, 0xFFFF);
+    }
+    if (g_osd_focus_en) {                             /* 焦点值 + 对焦条 */
+        long long fv = cam_focus_value();
+        double frac;
+        if (fv < 0) { fv = 0; }
+        if ((unsigned long long)fv > g_focus_peak) { g_focus_peak = (unsigned long long)fv; }
+        (td_void)snprintf(buf, sizeof(buf), "%lld", fv);
+        cam_txt_blit(base, stride, DET_W, DET_H, DET_OX + 2, DET_OY + OSD_L2_Y + 2, buf, OSD_SCALE, 0x8000);
+        cam_txt_blit(base, stride, DET_W, DET_H, DET_OX, DET_OY + OSD_L2_Y, buf, OSD_SCALE, 0xFFFF);
+        frac = (g_focus_peak > 0) ? (double)fv / (double)g_focus_peak : 0.0;
+        cam_osd_bar(base, stride, DET_OX, DET_OY + OSD_BAR_Y, OSD_W, OSD_BAR_H, frac);
+        if (g_focus_spot) {                           /* 中心测量区的框 */
+            cam_det_rect(base, stride, DET_W, DET_H,
+                BOX_X, BOX_Y, BOX_X + BOX_W, BOX_Y + BOX_H, 2, 0xFFFF);
+            cam_det_rect(base, stride, DET_W, DET_H,
+                BOX_X - 2, BOX_Y - 2, BOX_X + BOX_W + 2, BOX_Y + BOX_H + 2, 1, 0x8000);
+        }
+    }
+    if (g_npu_en && g_npu_draw) {
+        /* 标签最高只能到这里, 免得压在左上角的时间戳/对焦读数上 */
+        int tymin = g_osd_en ? (DET_OY + OSD_LH + 4) : 0;
+        if (g_osd_focus_en) { tymin = DET_OY + OSD_BAR_Y + OSD_BAR_H + 4; }
+        for (i = 0; i < n && i < NPU_MAX_DET; i++) {
+            unsigned short c = g_det_color[(b[i].cls < 0 ? 0 : b[i].cls) & 7];
+            int x0 = b[i].x0 * DET_W / 1000, x1 = b[i].x1 * DET_W / 1000;
+            int y0 = b[i].y0 * DET_H / 1000, y1 = b[i].y1 * DET_H / 1000;
+            int ty = y0 - 16 * DET_TXT_SCALE - 4;
+            char lab[40];
+            if (x1 <= x0 || y1 <= y0) { continue; }
+            cam_det_rect(base, stride, DET_W, DET_H, x0, y0, x1, y1, 2, c);
+            cam_det_rect(base, stride, DET_W, DET_H, x0 - 2, y0 - 2, x1 + 2, y1 + 2, 1, 0x8000);
+            if (b[i].score >= 0) {
+                (td_void)snprintf(lab, sizeof(lab), "%s %d%%", cam_coco_name(b[i].cls), b[i].score);
+            } else {
+                (td_void)snprintf(lab, sizeof(lab), "%s", cam_coco_name(b[i].cls));
+            }
+            /* 贴顶时标签画到框内; 再往下让开时间戳那条(否则叠在一起看不清) */
+            if (ty < tymin) { ty = y0 + 2; }
+            if (ty < tymin) { ty = tymin; }
+            cam_txt_blit(base, stride, DET_W, DET_H, x0 + 2, ty + 2, lab, DET_TXT_SCALE, 0x8000);
+            cam_txt_blit(base, stride, DET_W, DET_H, x0, ty, lab, DET_TXT_SCALE, c);
+        }
+    }
+    (td_void)ss_mpi_rgn_update_canvas(DET_HANDLE);
+}
+
+/* 输出张量名: 默认 yolov8 的, 载入模型后自动探测覆盖(见 cam_npu_detect_names).
+ * 各模型规律 = 计数张量 X + 坐标张量 X_ (yolov5/v8: output0, yolov7: output,
+ * yolov3/4: detection_nms_2 …), 所以按"配对"找即可, 不用写死型号表. */
+static char g_npu_num_name[64] = "output0";
+static char g_npu_roi_name[64] = "output0_";
+static char g_npu_rpn_name[] = "rpn_data";    /* 阈值输入张量名 */
 static volatile int g_npu_stop = 0;
+static pthread_t g_npu_th;                    /* 推理线程, 换模型时要 join */
+static int g_npu_th_run = 0;
+static int g_acl_inited = 0;                  /* svp acl 只初始化一次(换模型不重来) */
 static sample_svp_npu_task_info g_npu_task = {0};
 static sample_svp_npu_detection_info g_npu_det = {0};
 static ot_size g_npu_insize = {0};
 static void *g_npu_vb_virt = TD_NULL;
 static ot_vb_pool_info g_npu_vb_pool = {0};
-static ot_sample_svp_rect_info g_npu_rects = {0};   /* 最近一帧的检测框 (供 web 读) */
-static pthread_mutex_t g_npu_lock = PTHREAD_MUTEX_INITIALIZER;
+/* letterbox: 4K 是 16:9, 模型输入是正方形(640x640). 直接缩过去会横向压扁 1.78 倍
+ * (灯就被认成牙刷了). 所以扩展通道只出 640x360 等比画面, 拷进模型输入缓冲区正中间,
+ * 上下留灰边; 框坐标再按内容区反算回去. 代价 = 每次推理 345KB memcpy (~1ms). */
+static td_u8 *g_npu_in_virt = TD_NULL;    /* 模型自带的输入缓冲区(svp_acl_rt_malloc, NPU 可 DMA) */
+static td_u32 g_npu_in_size = 0, g_npu_in_stride = 0;
+static int g_npu_cw = 0, g_npu_ch = 0;    /* 内容区宽高 (640x360) */
+static int g_npu_lb_y = 0;                /* 内容区在模型输入里的 y 偏移 (140) */
+
+/* 载入模型后自动认出 ROI 输出张量名: 输出里成对出现 X / X_ (X_=坐标, X=计数).
+ * 认不出就沿用默认(yolov8 的 output0/output0_)并打日志. */
+static void cam_npu_detect_names(void)
+{
+    sample_svp_npu_model_info *mi = sample_common_svp_npu_get_model_info(0);
+    const char *names[8];
+    size_t n, i, k;
+    if (mi == TD_NULL || mi->model_desc == TD_NULL) { return; }
+    n = svp_acl_mdl_get_num_outputs(mi->model_desc);
+    if (n > sizeof(names) / sizeof(names[0])) { n = sizeof(names) / sizeof(names[0]); }
+    for (i = 0; i < n; i++) {
+        names[i] = svp_acl_mdl_get_output_name_by_index(mi->model_desc, i);
+        printf("[npu] 输出%zu: %s\n", i, (names[i] != TD_NULL) ? names[i] : "(null)");
+    }
+    for (i = 0; i < n; i++) {
+        size_t li;
+        if (names[i] == TD_NULL) { continue; }
+        li = strlen(names[i]);
+        for (k = 0; k < n; k++) {                    /* 找 names[k] == names[i] + "_" */
+            if (k == i || names[k] == TD_NULL) { continue; }
+            if (strlen(names[k]) == li + 1 && names[k][li] == '_' && !strncmp(names[i], names[k], li)) {
+                (td_void)snprintf(g_npu_num_name, sizeof(g_npu_num_name), "%s", names[i]);
+                (td_void)snprintf(g_npu_roi_name, sizeof(g_npu_roi_name), "%s", names[k]);
+                printf("[npu] 张量名: 计数=%s 坐标=%s (自动识别)\n", g_npu_num_name, g_npu_roi_name);
+                return;
+            }
+        }
+    }
+    printf("[npu] 未识别出配对张量名, 沿用 %s/%s\n", g_npu_num_name, g_npu_roi_name);
+}
 
 /* 初始化: acl init -> 载模型 -> 取输入分辨率 -> 建 dataset/task/work buf -> 设阈值.
  * 失败按序回滚, 返回 -1. 全程非致命(相机不受影响). */
@@ -5403,15 +5823,23 @@ static int cam_npu_init(void)
     sample_svp_npu_threshold th;
     const char *model_path = cam_npu_model_path();
 
-    ret = sample_common_svp_npu_acl_init("", NPU_DEV_ID);
-    if (ret != TD_SUCCESS) { printf("[npu] acl init failed %#x\n", ret); return -1; }
+    if (!g_acl_inited) {
+        ret = sample_common_svp_npu_acl_init("", NPU_DEV_ID);
+        if (ret != TD_SUCCESS) { printf("[npu] acl init failed %#x\n", ret); return -1; }
+        g_acl_inited = 1;
+    }
 
     ret = sample_common_svp_npu_load_model(model_path, 0, TD_FALSE);
-    if (ret != TD_SUCCESS) { printf("[npu] load model %s failed %#x\n", model_path, ret); goto err_acl; }
+    if (ret != TD_SUCCESS) { printf("[npu] load model %s failed %#x\n", model_path, ret); return -1; }
     printf("[npu] model = %s\n", model_path);
+    cam_npu_detect_names();
 
     ret = sample_common_svp_npu_get_input_resolution(0, 0, &g_npu_insize);
-    if (ret != TD_SUCCESS) { printf("[npu] get input resolution failed %#x\n", ret); goto err_model; }
+    if (ret != TD_SUCCESS) {
+        printf("[npu] get input resolution failed %#x\n", ret);
+        (td_void)sample_common_svp_npu_unload_model(0);
+        return -1;
+    }
     printf("[npu] model input = %ux%u\n", g_npu_insize.width, g_npu_insize.height);
 
     g_npu_task.cfg.max_batch_num     = 1;
@@ -5421,7 +5849,30 @@ static int cam_npu_init(void)
     g_npu_task.cfg.model_idx         = 0;
 
     ret = sample_common_svp_npu_create_input(&g_npu_task);
-    if (ret != TD_SUCCESS) { printf("[npu] create input failed %#x\n", ret); goto err_model; }
+    if (ret != TD_SUCCESS) {
+        printf("[npu] create input failed %#x\n", ret);
+        (td_void)sample_common_svp_npu_unload_model(0);
+        return -1;
+    }
+
+    /* 拿到模型输入缓冲区并铺灰底(Y=114/UV=128, 和 YOLO letterbox 的惯例一致).
+     * 内容区 = 等比缩到模型宽的 16:9 画面, 垂直居中. */
+    if (sample_common_svp_npu_get_input_data_buffer_info(&g_npu_task, 0,
+            &g_npu_in_virt, &g_npu_in_size, &g_npu_in_stride) != TD_SUCCESS || g_npu_in_virt == TD_NULL) {
+        printf("[npu] get input buffer failed\n"); goto err_in;
+    }
+    g_npu_cw = (int)g_npu_insize.width;
+    g_npu_ch = ((int)g_npu_insize.width * 9 / 16) & (~1);        /* 640 -> 360, 偶数 */
+    if (g_npu_ch > (int)g_npu_insize.height) { g_npu_ch = (int)g_npu_insize.height; }
+    g_npu_lb_y = (((int)g_npu_insize.height - g_npu_ch) / 2) & (~1);
+    (td_void)memset_s(g_npu_in_virt, g_npu_in_size, 114,
+        (size_t)g_npu_in_stride * g_npu_insize.height);          /* Y 平面 = 灰 */
+    (td_void)memset_s(g_npu_in_virt + (size_t)g_npu_in_stride * g_npu_insize.height,
+        g_npu_in_size - (size_t)g_npu_in_stride * g_npu_insize.height, 128,
+        (size_t)g_npu_in_stride * g_npu_insize.height / 2);      /* UV 平面 = 中性 */
+    printf("[npu] letterbox: 内容 %dx%d 居中于 %ux%u (y偏移 %d), 输入缓冲 %u 字节 stride %u\n",
+        g_npu_cw, g_npu_ch, g_npu_insize.width, g_npu_insize.height, g_npu_lb_y,
+        g_npu_in_size, g_npu_in_stride);
     ret = sample_common_svp_npu_create_output(&g_npu_task);
     if (ret != TD_SUCCESS) { printf("[npu] create output failed %#x\n", ret); goto err_in; }
     ret = sample_common_svp_npu_create_task_buf(&g_npu_task);
@@ -5429,8 +5880,11 @@ static int cam_npu_init(void)
     ret = sample_common_svp_npu_create_work_buf(&g_npu_task);
     if (ret != TD_SUCCESS) { printf("[npu] create work buf failed %#x\n", ret); goto err_taskbuf; }
 
-    /* yolov8 阈值: {nms=0.9, score=0.15, min_h=1, min_w=1, "rpn_data"} */
-    th.nms_threshold = 0.9f; th.score_threshold = 0.15f;
+    /* 阈值张量 "rpn_data": nms 用 g_npu_nms(可 web 调, 默认 0.45);
+     * score 留 0.10 让模型多吐候选, 置信度门槛在我们自己解析时按 g_npu_score 卡 —— 这样
+     * 调门槛不用重新初始化模型. */
+    (td_void)memset_s(&th, sizeof(th), 0, sizeof(th));
+    th.nms_threshold = (float)g_npu_nms / 100.0f; th.score_threshold = 0.10f;
     th.min_height = 1.0f; th.min_width = 1.0f; th.name = g_npu_rpn_name;
     ret = sample_common_svp_npu_set_threshold(&th, 1, &g_npu_task);
     if (ret != TD_SUCCESS) { printf("[npu] set threshold failed %#x\n", ret); goto err_workbuf; }
@@ -5445,12 +5899,35 @@ err_workbuf: (td_void)sample_common_svp_npu_destroy_work_buf(&g_npu_task);
 err_taskbuf: (td_void)sample_common_svp_npu_destroy_task_buf(&g_npu_task);
 err_out:     (td_void)sample_common_svp_npu_destroy_output(&g_npu_task);
 err_in:      (td_void)sample_common_svp_npu_destroy_input(&g_npu_task);
-err_model:   (td_void)sample_common_svp_npu_unload_model(0);
-err_acl:     (td_void)sample_common_svp_npu_acl_deinit(NPU_DEV_ID);
-    return -1;
+             (td_void)sample_common_svp_npu_unload_model(0);
+    return -1;      /* acl 保持已初始化状态, 供下次换模型复用 */
 }
 
-/* 建 VPSS 扩展通道 chn4: 绑 phys chn0(4K主), TAIL, 缩到模型输入尺寸, YUV420SP, depth=1. */
+/* 卸载当前模型(停线程 + 释放 buf + 关扩展通道), 保留 acl. 换模型/关检测都走这里. */
+static void cam_npu_teardown(void)
+{
+    if (g_npu_th_run) {
+        g_npu_stop = 1;
+        (td_void)pthread_join(g_npu_th, TD_NULL);   /* 线程最多 2s 内退出(取帧超时) */
+        g_npu_th_run = 0;
+    }
+    g_npu_ready = 0;
+    (td_void)ss_mpi_vpss_disable_chn(0, NPU_EXT_CHN);
+    (td_void)sample_common_svp_npu_destroy_work_buf(&g_npu_task);
+    (td_void)sample_common_svp_npu_destroy_task_buf(&g_npu_task);
+    (td_void)sample_common_svp_npu_destroy_output(&g_npu_task);
+    (td_void)sample_common_svp_npu_destroy_input(&g_npu_task);
+    (td_void)sample_common_svp_npu_unload_model(0);
+    g_npu_in_virt = TD_NULL;
+    g_npu_vb_virt = TD_NULL;        /* 新模型输入尺寸可能不同, VB 池重新映射 */
+    g_npu_layout_logged = 0;
+    pthread_mutex_lock(&g_npu_lock);
+    g_npu_box_n = 0; g_npu_last_num = 0;
+    pthread_mutex_unlock(&g_npu_lock);
+}
+
+/* 建 VPSS 扩展通道 chn4: 绑 phys chn0(4K主), TAIL, 等比缩到 640x360, YUV420SP, depth=1.
+ * (不是缩到 640x640 —— 那样会压扁; 补边在 cam_npu_letterbox 里做) */
 static int cam_npu_ext_chn_start(void)
 {
     ot_vpss_ext_chn_attr ext;
@@ -5458,8 +5935,8 @@ static int cam_npu_ext_chn_start(void)
     (td_void)memset_s(&ext, sizeof(ext), 0, sizeof(ext));
     ext.bind_chn      = 0;
     ext.src_type      = OT_EXT_CHN_SRC_TYPE_TAIL;
-    ext.width         = g_npu_insize.width;
-    ext.height        = g_npu_insize.height;
+    ext.width         = (td_u32)g_npu_cw;
+    ext.height        = (td_u32)g_npu_ch;
     ext.depth         = 1;
     ext.video_format  = OT_VIDEO_FORMAT_LINEAR;
     ext.dynamic_range = OT_DYNAMIC_RANGE_SDR8;
@@ -5474,17 +5951,169 @@ static int cam_npu_ext_chn_start(void)
     return 0;
 }
 
-/* 推理线程: 取扩展通道帧 -> (每N帧) 零拷贝喂 NPU -> 推理 -> 解析 ROI -> 打印/缓存. */
+/* 模型输入坐标(含灰边) -> 内容区千分比 */
+static int cam_lb_x(td_float x)
+{
+    int v = (g_npu_cw > 0) ? (int)(x * 1000.0f / (float)g_npu_cw) : 0;
+    return (v < 0) ? 0 : ((v > 1000) ? 1000 : v);
+}
+static int cam_lb_y(td_float y)
+{
+    int v = (g_npu_ch > 0) ? (int)((y - (float)g_npu_lb_y) * 1000.0f / (float)g_npu_ch) : 0;
+    return (v < 0) ? 0 : ((v > 1000) ? 1000 : v);
+}
+
+/* 类别白名单: g_npu_cls 是逗号分隔的类别号, 空串=全要. 逐次解析字符串够快(每帧最多十几次) */
+static int cam_npu_cls_ok(int cls)
+{
+    const char *p = g_npu_cls;
+    if (p[0] == '\0') { return 1; }
+    if (cls < 0) { return 0; }
+    while (*p != '\0') {
+        if (*p >= '0' && *p <= '9') {
+            int v = atoi(p);
+            if (v == cls) { return 1; }
+            while (*p >= '0' && *p <= '9') { p++; }
+        } else {
+            p++;
+        }
+    }
+    return 0;
+}
+
+/* 解析一次推理结果 -> g_npu_box (千分比坐标 + 类别 + 置信度). 返回目标数, 失败 -1.
+ * .om 里已带 NMS. 实测本模型 (yolov8.om): num 张量 'output0' 末维=1 = 目标总数;
+ * roi 张量 'output0_' 有 6 "行", 行间隔 stride 字节:
+ *   行0..3 = xmin/ymin/xmax/ymax (模型输入 640 空间), 行4 = 置信度 0..1, 行5 = 类别号.
+ * 行数/类别数都从 buffer_size/stride 和 dims 现场算, 不写死 —— 换模型也不会跑飞. */
+static int cam_npu_parse(void)
+{
+    sample_svp_npu_model_info *mi = sample_common_svp_npu_get_model_info(0);
+    svp_acl_mdl_io_dims dims;
+    svp_acl_data_buffer *nb = TD_NULL, *rb = TD_NULL;
+    size_t num_idx = 0, roi_idx = 0, rstride, rsize, rows, fs;
+    td_float *nd = TD_NULL, *rd = TD_NULL, *xmin, *ymin, *xmax, *ymax, *score, *clsrow;
+    cam_npu_box box[NPU_MAX_DET] = {{0}};
+    unsigned long long now;
+    int ncls, c, i, j = 0, total = 0;
+
+    if (mi == TD_NULL || mi->model_desc == TD_NULL) { return -1; }
+    if (svp_acl_mdl_get_output_index_by_name(mi->model_desc, g_npu_num_name, &num_idx) != SVP_ACL_SUCCESS ||
+        svp_acl_mdl_get_output_index_by_name(mi->model_desc, g_npu_roi_name, &roi_idx) != SVP_ACL_SUCCESS) {
+        return -1;
+    }
+    if (svp_acl_mdl_get_output_dims(mi->model_desc, num_idx, &dims) != SVP_ACL_SUCCESS) { return -1; }
+    ncls = (dims.dim_count > 0) ? (int)dims.dims[dims.dim_count - 1] : 0;
+    nb = svp_acl_mdl_get_dataset_buffer(g_npu_task.output_dataset, num_idx);
+    rb = svp_acl_mdl_get_dataset_buffer(g_npu_task.output_dataset, roi_idx);
+    if (nb == TD_NULL || rb == TD_NULL || ncls <= 0) { return -1; }
+    nd = (td_float *)svp_acl_get_data_buffer_addr(nb);
+    rd = (td_float *)svp_acl_get_data_buffer_addr(rb);
+    rstride = svp_acl_get_data_buffer_stride(rb);
+    rsize = svp_acl_get_data_buffer_size(rb);
+    if (nd == TD_NULL || rd == TD_NULL || rstride == 0) { return -1; }
+    rows = rsize / rstride;
+    fs = rstride / sizeof(td_float);
+    if (rows < 4) { return -1; }
+    xmin = rd; ymin = rd + fs; xmax = rd + 2 * fs; ymax = rd + 3 * fs;
+    score  = (rows >= 5) ? (rd + 4 * fs) : TD_NULL;
+    clsrow = (rows >= 6) ? (rd + 5 * fs) : TD_NULL;
+
+    for (c = 0; c < ncls; c++) {
+        int cnt = (int)nd[c];                  /* 末维=1 时就是总数; 若某模型按类分组也照样吃 */
+        for (i = 0; i < cnt; i++, total++) {
+            int cls, sc;
+            if (j >= NPU_MAX_DET) { continue; }
+            sc = (score != TD_NULL) ? (int)(score[total] * 100.0f + 0.5f) : -1;
+            if (sc >= 0 && sc < g_npu_score) { continue; }   /* 低置信度的丢掉 */
+            if (clsrow != TD_NULL) {
+                cls = (int)(clsrow[total] + 0.5f);           /* 行5 = 类别号 */
+                if (cls < 0 || cls >= (int)(sizeof(g_coco) / sizeof(g_coco[0]))) { cls = -1; }
+            } else {
+                cls = (ncls > 1) ? c : -1;                   /* 退路: 按类分组的 num 张量 */
+            }
+            if (!cam_npu_cls_ok(cls)) { continue; }           /* 类别白名单 */
+            /* 坐标在模型输入(含灰边)空间 -> 换算到内容区千分比 */
+            box[j].x0 = cam_lb_x(xmin[total]);
+            box[j].y0 = cam_lb_y(ymin[total]);
+            box[j].x1 = cam_lb_x(xmax[total]);
+            box[j].y1 = cam_lb_y(ymax[total]);
+            box[j].cls = cls;
+            box[j].score = (sc > 100) ? 100 : sc;
+            j++;
+        }
+    }
+
+    now = sample_common_svp_npu_get_timestamp();                 /* ms */
+    pthread_mutex_lock(&g_npu_lock);
+    if (j > 0) {                                                 /* 有目标: 换上新的一批 */
+        (td_void)memcpy_s(g_npu_box, sizeof(g_npu_box), box, sizeof(box));
+        g_npu_box_n = j;
+        g_npu_last_num = j;
+        g_npu_hit_ms = now;
+    } else if (g_npu_box_n > 0 && now - g_npu_hit_ms > NPU_HOLD_MS) {
+        g_npu_box_n = 0;                                         /* 空窗超过保持时间才清 */
+        g_npu_last_num = 0;
+    }
+    pthread_mutex_unlock(&g_npu_lock);
+
+    if (!g_npu_layout_logged && total > 0) {   /* 有目标时才打, 否则看不到样本值 */
+        g_npu_layout_logged = 1;
+        printf("[npu] 输出布局: num='%s' 末维=%d | roi='%s' 行数=%d stride=%d | 置信度=%s 类别=%s\n",
+            g_npu_num_name, ncls, g_npu_roi_name, (int)rows, (int)rstride,
+            (score != TD_NULL) ? "行4" : "无", (clsrow != TD_NULL) ? "行5" : "无");
+        printf("[npu] det0 原始值: x0=%.1f y0=%.1f x1=%.1f y1=%.1f 行4=%.3f 行5=%.3f\n",
+            xmin[0], ymin[0], xmax[0], ymax[0],
+            (score != TD_NULL) ? score[0] : -1.0f, (clsrow != TD_NULL) ? clsrow[0] : -1.0f);
+    }
+    return j;                                  /* 过完门槛后剩下的目标数 */
+}
+
+/* 把扩展通道的一帧(640x360 YUV420SP)拷进模型输入缓冲区的内容区, 上下灰边不动.
+ * 灰边只在初始化时铺一次 —— 内容区每帧覆盖, 边框区永远是灰的, 不用重铺. */
+static td_s32 cam_npu_letterbox(const ot_video_frame_info *f)
+{
+    const ot_video_frame *v = &f->video_frame;
+    td_u8 *sy, *suv, *dy, *duv;
+    int r, sstride, cw, ch;
+    if (g_npu_in_virt == TD_NULL || g_npu_vb_virt == TD_NULL) { return TD_FAILURE; }
+    sstride = (int)v->stride[0];
+    cw = ((int)v->width < g_npu_cw) ? (int)v->width : g_npu_cw;
+    ch = ((int)v->height < g_npu_ch) ? (int)v->height : g_npu_ch;
+    sy  = (td_u8 *)g_npu_vb_virt + (v->phys_addr[0] - g_npu_vb_pool.pool_phy_addr);
+    suv = (td_u8 *)g_npu_vb_virt + (v->phys_addr[1] - g_npu_vb_pool.pool_phy_addr);
+    dy  = g_npu_in_virt + (size_t)g_npu_lb_y * g_npu_in_stride;
+    duv = g_npu_in_virt + (size_t)g_npu_in_stride * g_npu_insize.height
+                        + (size_t)(g_npu_lb_y / 2) * g_npu_in_stride;
+    for (r = 0; r < ch; r++) {
+        (td_void)memcpy_s(dy + (size_t)r * g_npu_in_stride, (size_t)cw, sy + (size_t)r * sstride, (size_t)cw);
+    }
+    for (r = 0; r < ch / 2; r++) {          /* UV 交织平面, 行数是 Y 的一半 */
+        (td_void)memcpy_s(duv + (size_t)r * g_npu_in_stride, (size_t)cw, suv + (size_t)r * sstride, (size_t)cw);
+    }
+    return TD_SUCCESS;
+}
+
+/* 推理线程: 取扩展通道帧 -> (每N帧) 补边拷贝喂 NPU -> 推理 -> 解析 -> 缓存(画框由 OSD 线程做). */
 static void *cam_npu_thread(void *arg)
 {
     ot_video_frame_info frame;
     td_s32 ret;
-    int fno = 0;
+    int fno = 0, nlog = 0;
     (td_void)arg;
     (td_void)prctl(PR_SET_NAME, "cam_npu", 0, 0, 0);
     (td_void)svp_acl_rt_set_device(NPU_DEV_ID);   /* 本线程绑 NPU 设备 */
 
     while (!g_npu_stop) {
+        if (!g_npu_en) {                       /* web 关掉了: 清空框(OSD 线程随即擦掉画面) */
+            if (g_npu_box_n != 0) {
+                pthread_mutex_lock(&g_npu_lock);
+                g_npu_box_n = 0; g_npu_last_num = 0;
+                pthread_mutex_unlock(&g_npu_lock);
+            }
+            usleep(200000);
+            continue;
+        }
         ret = ss_mpi_vpss_get_chn_frame(0, NPU_EXT_CHN, &frame, 2000);
         if (ret != TD_SUCCESS) { usleep(20000); continue; }
         if ((++fno % g_npu_interval) != 0) {
@@ -5498,28 +6127,22 @@ static void *cam_npu_thread(void *arg)
             }
         }
         if (g_npu_vb_virt != TD_NULL) {
-            td_u8 *virt = (td_u8 *)g_npu_vb_virt +
-                (frame.video_frame.phys_addr[0] - g_npu_vb_pool.pool_phy_addr);
-            td_u32 size = frame.video_frame.height * frame.video_frame.stride[0] * 3 / 2;
-            ret = sample_common_svp_npu_update_input_data_buffer_info(virt, size,
-                frame.video_frame.stride[0], 0, &g_npu_task);
-            if (ret == TD_SUCCESS) { ret = sample_common_svp_npu_model_execute(&g_npu_task); }
+            ret = cam_npu_letterbox(&frame);       /* 等比画面拷进灰底输入缓冲区 */
             if (ret == TD_SUCCESS) {
-                ot_sample_svp_rect_info rects;
-                (td_void)memset_s(&rects, sizeof(rects), 0, sizeof(rects));
-                /* proc=show=frame -> 框坐标在模型输入(640)空间, Phase1 直接打印 */
-                if (sample_common_svp_npu_roi_to_rect(&g_npu_task, &g_npu_det,
-                        &frame, &frame, &rects) == TD_SUCCESS) {
-                    int i, n = rects.num;
-                    pthread_mutex_lock(&g_npu_lock);
-                    g_npu_rects = rects; g_npu_last_num = n;
-                    pthread_mutex_unlock(&g_npu_lock);
-                    if (n > 0) {
-                        printf("[npu] frame#%d detections=%d\n", fno, n);
-                        for (i = 0; i < n && i < 8; i++) {
-                            printf("   box%d (%d,%d)-(%d,%d)\n", i,
-                                rects.rect[i].point[0].x, rects.rect[i].point[0].y,
-                                rects.rect[i].point[2].x, rects.rect[i].point[2].y);
+                td_u64 t0 = sample_common_svp_npu_get_timestamp();
+                ret = sample_common_svp_npu_model_execute(&g_npu_task);
+                g_npu_ms = (int)(sample_common_svp_npu_get_timestamp() - t0);
+            }
+            if (ret == TD_SUCCESS) {
+                int n = cam_npu_parse();       /* 画框由 OSD 线程做, 这里只更新数据 */
+                if (n >= 0) {
+                    if (n > 0 && (nlog++ % 30) == 0) {   /* 日志别刷屏, 每 30 次打一条 */
+                        int i;
+                        printf("[npu] frame#%d 目标=%d (%d ms)\n", fno, n, g_npu_ms);
+                        for (i = 0; i < n && i < NPU_MAX_DET; i++) {
+                            printf("   %s %d%% (%d,%d)-(%d,%d)‰\n", cam_coco_name(g_npu_box[i].cls),
+                                g_npu_box[i].score, g_npu_box[i].x0, g_npu_box[i].y0,
+                                g_npu_box[i].x1, g_npu_box[i].y1);
                         }
                     }
                 }
@@ -5533,7 +6156,6 @@ static void *cam_npu_thread(void *arg)
 /* 启动 NPU 检测 (由 sample_venc_web 在所有通道就绪后调用, 受 g_npu_en 控制). 非致命. */
 static void cam_npu_start(void)
 {
-    pthread_t npu_th;
     if (cam_npu_init() != 0) { printf("[npu] init failed -> detection disabled (camera unaffected)\n"); return; }
     if (cam_npu_ext_chn_start() != 0) {
         printf("[npu] ext chn failed -> detection disabled\n");
@@ -5542,16 +6164,182 @@ static void cam_npu_start(void)
         (td_void)sample_common_svp_npu_destroy_output(&g_npu_task);
         (td_void)sample_common_svp_npu_destroy_input(&g_npu_task);
         (td_void)sample_common_svp_npu_unload_model(0);
-        (td_void)sample_common_svp_npu_acl_deinit(NPU_DEV_ID);
         return;
     }
     g_npu_ready = 1;
     g_npu_stop = 0;
-    if (pthread_create(&npu_th, TD_NULL, cam_npu_thread, TD_NULL) != 0) {
+    if (pthread_create(&g_npu_th, TD_NULL, cam_npu_thread, TD_NULL) != 0) {
         printf("[npu] thread create failed\n"); g_npu_ready = 0; return;
     }
-    printf("[npu] detection started (ext chn %d, %ux%u, every %d frames)\n",
-        NPU_EXT_CHN, g_npu_insize.width, g_npu_insize.height, g_npu_interval);
+    g_npu_th_run = 1;
+    printf("[npu] detection started (%s, ext chn %d, %ux%u, every %d frames)\n",
+        g_npu_model, NPU_EXT_CHN, g_npu_insize.width, g_npu_insize.height, g_npu_interval);
+}
+
+/* 换模型(热切换): 卸掉当前的再按新文件名起一遍. 失败会退回原模型, 退不回就只是关掉检测. */
+static void cam_npu_switch(const char *name)
+{
+    char old[64];
+    (td_void)snprintf(old, sizeof(old), "%s", g_npu_model);
+    if (g_npu_ready) { cam_npu_teardown(); }
+    pthread_mutex_lock(&g_cfg_lock);
+    (td_void)snprintf(g_npu_model, sizeof(g_npu_model), "%s", name);
+    pthread_mutex_unlock(&g_cfg_lock);
+    if (access(cam_npu_model_path(), R_OK) != 0) {
+        printf("[npu] 模型 %s 不存在, 退回 %s\n", name, old);
+        (td_void)snprintf(g_npu_model, sizeof(g_npu_model), "%s", old);
+    }
+    cam_npu_start();
+    if (!g_npu_ready && strcmp(g_npu_model, old) != 0) {
+        printf("[npu] %s 启动失败, 退回 %s\n", g_npu_model, old);
+        (td_void)snprintf(g_npu_model, sizeof(g_npu_model), "%s", old);
+        cam_npu_start();
+    }
+}
+
+/* GET /models -> 列出 /tmp/model 与 /opt/model 下的 .om (名字/大小/是否当前) */
+static void cam_http_models(int fd)
+{
+    char j[1024];
+    int n = 0, first = 1, d;
+    n += snprintf(j + n, sizeof(j) - n, "{\"cur\":\"%s\",\"list\":[", g_npu_model);
+    for (d = 0; d < NPU_MODEL_DIRS; d++) {
+        DIR *dp = opendir(g_npu_model_dirs[d]);
+        struct dirent *de;
+        if (dp == TD_NULL) { continue; }
+        while ((de = readdir(dp)) != TD_NULL && n < (int)sizeof(j) - 120) {
+            size_t ln = strlen(de->d_name);
+            char full[160];
+            struct stat st;
+            if (ln < 4 || strcmp(de->d_name + ln - 3, ".om") != 0) { continue; }
+            (td_void)snprintf(full, sizeof(full), "%s/%s", g_npu_model_dirs[d], de->d_name);
+            if (stat(full, &st) != 0) { continue; }
+            n += snprintf(j + n, sizeof(j) - n, "%s{\"name\":\"%s\",\"kb\":%ld,\"dir\":\"%s\"}",
+                first ? "" : ",", de->d_name, (long)(st.st_size / 1024), g_npu_model_dirs[d]);
+            first = 0;
+        }
+        (td_void)closedir(dp);
+    }
+    n += snprintf(j + n, sizeof(j) - n, "]}");
+    cam_http_body(fd, "application/json", j, n);
+}
+
+/* GET /npu -> 检测状态 + 最近一帧目标 (坐标换算到 720p 预览像素, w/h 给出参考画幅) */
+static void cam_http_npu(int fd)
+{
+    char j[2048];
+    cam_npu_box b[NPU_MAX_DET];
+    int n = 0, i, cnt;
+    pthread_mutex_lock(&g_npu_lock);
+    cnt = g_npu_box_n;
+    (td_void)memcpy_s(b, sizeof(b), g_npu_box, sizeof(g_npu_box));
+    pthread_mutex_unlock(&g_npu_lock);
+    n += snprintf(j + n, sizeof(j) - n,
+        "{\"en\":%d,\"ready\":%d,\"draw\":%d,\"interval\":%d,\"score\":%d,\"nms\":%d,"
+        "\"cls\":\"%s\",\"ms\":%d,\"w\":%d,\"h\":%d,\"n\":%d,\"det\":[",
+        g_npu_en, g_npu_ready, g_npu_draw, g_npu_interval, g_npu_score, g_npu_nms,
+        g_npu_cls, g_npu_ms, DET_W, DET_H, cnt);
+    for (i = 0; i < cnt && i < NPU_MAX_DET && n < (int)sizeof(j) - 120; i++) {
+        int x0 = b[i].x0 * DET_W / 1000, x1 = b[i].x1 * DET_W / 1000;
+        int y0 = b[i].y0 * DET_H / 1000, y1 = b[i].y1 * DET_H / 1000;
+        n += snprintf(j + n, sizeof(j) - n,
+            "%s{\"x\":%d,\"y\":%d,\"w\":%d,\"h\":%d,\"c\":%d,\"s\":%d,\"n\":\"%s\"}",
+            (i > 0) ? "," : "", x0, y0, x1 - x0, y1 - y0, b[i].cls, b[i].score,
+            cam_coco_name(b[i].cls));
+    }
+    n += snprintf(j + n, sizeof(j) - n, "]}");
+    cam_http_body(fd, "application/json", j, n);
+}
+
+/* GET /setnpu?en=&interval=&draw= : 立即生效 + 存 param. en 从 0->1 时懒启动 NPU. */
+static void cam_http_setnpu(int fd, const char *req)
+{
+    char v[16];
+    int changed = 0, start_now = 0;
+    if (cam_qparam(req, "en", v, sizeof(v))) {
+        int e = atoi(v) ? 1 : 0;
+        if (e && !g_npu_ready) { start_now = 1; }        /* 开机时是关的 -> 现在才初始化 */
+        pthread_mutex_lock(&g_cfg_lock);
+        g_npu_en = e;
+        pthread_mutex_unlock(&g_cfg_lock);
+        changed = 1;
+    }
+    if (cam_qparam(req, "interval", v, sizeof(v))) {
+        int iv = atoi(v);
+        if (iv < 1) { iv = 1; }
+        if (iv > 30) { iv = 30; }
+        pthread_mutex_lock(&g_cfg_lock);
+        g_npu_interval = iv;
+        pthread_mutex_unlock(&g_cfg_lock);
+        changed = 1;
+    }
+    if (cam_qparam(req, "draw", v, sizeof(v))) {
+        pthread_mutex_lock(&g_cfg_lock);
+        g_npu_draw = atoi(v) ? 1 : 0;
+        pthread_mutex_unlock(&g_cfg_lock);
+        changed = 1;
+    }
+    if (cam_qparam(req, "score", v, sizeof(v))) {
+        int sc = atoi(v);
+        if (sc < 1) { sc = 1; }
+        if (sc > 99) { sc = 99; }
+        pthread_mutex_lock(&g_cfg_lock);
+        g_npu_score = sc;
+        pthread_mutex_unlock(&g_cfg_lock);
+        changed = 1;
+    }
+    if (cam_qparam(req, "nms", v, sizeof(v))) {
+        int nv = atoi(v);
+        if (nv < 5) { nv = 5; }
+        if (nv > 95) { nv = 95; }
+        pthread_mutex_lock(&g_cfg_lock);
+        g_npu_nms = nv;
+        pthread_mutex_unlock(&g_cfg_lock);
+        if (g_npu_ready) {                               /* 阈值张量可以在线改, 不用重载模型 */
+            sample_svp_npu_threshold th;
+            (td_void)memset_s(&th, sizeof(th), 0, sizeof(th));
+            th.nms_threshold = (float)g_npu_nms / 100.0f; th.score_threshold = 0.10f;
+            th.min_height = 1.0f; th.min_width = 1.0f; th.name = g_npu_rpn_name;
+            (td_void)sample_common_svp_npu_set_threshold(&th, 1, &g_npu_task);
+        }
+        changed = 1;
+    }
+    {   /* 类别白名单: 只留数字和逗号, 防止乱字符进配置文件 */
+        char cl[128];
+        if (cam_qparam(req, "cls", cl, sizeof(cl))) {
+            char out[128];
+            int i, o = 0;
+            for (i = 0; cl[i] != '\0' && o < (int)sizeof(out) - 1; i++) {
+                if ((cl[i] >= '0' && cl[i] <= '9') || cl[i] == ',') { out[o++] = cl[i]; }
+            }
+            out[o] = '\0';
+            pthread_mutex_lock(&g_cfg_lock);
+            snprintf(g_npu_cls, sizeof(g_npu_cls), "%s", out);
+            pthread_mutex_unlock(&g_cfg_lock);
+            changed = 1;
+        }
+    }
+    {   /* 换模型: 文件名只允许字母数字和 . _ - (防路径穿越) */
+        char mn[64];
+        if (cam_qparam(req, "model", mn, sizeof(mn)) && mn[0] != '\0') {
+            char out[64];
+            int i, o = 0;
+            for (i = 0; mn[i] != '\0' && o < (int)sizeof(out) - 1; i++) {
+                char c = mn[i];
+                if ((c >= 'a' && c <= 'z') || (c >= 'A' && c <= 'Z') || (c >= '0' && c <= '9') ||
+                    c == '.' || c == '_' || c == '-') { out[o++] = c; }
+            }
+            out[o] = '\0';
+            if (o > 3 && strcmp(out, g_npu_model) != 0) {
+                cam_npu_switch(out);
+                start_now = 0;                           /* switch 里已经起过了 */
+                changed = 1;
+            }
+        }
+    }
+    if (start_now) { cam_npu_start(); }                  /* 载模型+建扩展通道+起线程, 非致命 */
+    if (changed) { cam_cfg_save(); }                     /* 画面由 OSD 线程 200ms 内跟上 */
+    cam_http_text(fd, "\xe5\xb7\xb2\xe4\xbf\x9d\xe5\xad\x98");  /* 已保存 */
 }
 /* =================== end NPU =================== */
 

@@ -5,3 +5,4 @@ src_changes/
 *.tmp
 .DS_Store
 Thumbs.db
+images/

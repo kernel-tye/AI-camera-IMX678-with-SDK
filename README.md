@@ -25,10 +25,16 @@ cd /path/to/.../a55_linux/source/mpp/sample/venc/tianyuan_pkg && ./build_firmwar
 **只想重刷相机、不改代码?** 光靠 `user.squashfs` + `mtdwrite` 即可,**不需要 SDK**:板子进 port-23 后门或串口 →
 传这两个文件 → `mtdwrite user.squashfs /dev/mtd5` → reboot。
 
-### 当前状态（2026-07-22）
-- **flash 里(物理板子在跑)= `ccd32603`**:屏幕(默认关)+ OSD 时间戳 + 对焦助手(全画幅)
-- **本仓最新 = `e6968f3f`**(`user.squashfs` 即此版):加了 **点对焦 + 中心对焦框 + 焦点值叠加到画面**;已编译 + /tmp 实测,**未固化**
-- **下一步 = NPU / YOLO**:板上 NPU 驱动已就绪,SDK 自带 yolov8/v5 `.om` 模型 + `svp_acl` 运行时,待集成
+### 当前状态（2026-07-26）
+- **flash 里(物理板子在跑)= `abb97db7`**(`user.squashfs` 即此版, 11.6MB):**NPU 目标检测已固化并重启验证**
+  - YOLOv8n / YOLOv7 两个模型进 flash(`/opt/model/`),网页「AI 检测」页可**热切换**(约 2 秒)
+  - 推理 **16ms**(yolov8n) / **24ms**(yolov7),每 3 帧一次,load 与不开检测基本持平
+  - 框+类别名+置信度**画进画面**(720p 预览/MJPEG/DSI 屏都可见),置信度门槛 / NMS / 类别白名单网页可调
+  - **letterbox 修正**:4K(16:9) 等比缩到 640x360 再补灰边进 640x640,不再横向压扁(之前灯会被认成牙刷)
+  - 输出张量名**自动识别**(配对 `X`/`X_`),换任何 yolo 系 `.om` 都不用改代码
+- **模型转换**:`.om` 是 PICO 格式离线产物,**只能 PC 端转**(SVP_PC 里的 CANN `atc` + `amct`,x86_64);
+  `svp_acl` 运行时只有 load 接口,板子上转不了
+- **下一步**:专精模型(人脸/宠物)+ AF 统计窗口跟检测框走(追焦第一步)
 
 ### 目录 / Layout
 | 路径 | 说明 |
@@ -74,10 +80,15 @@ cd /path/to/.../a55_linux/source/mpp/sample/venc/tianyuan_pkg && ./build_firmwar
 **Just reflash the camera (no rebuild)?** `user.squashfs` + `mtdwrite` are enough — **no SDK needed**: get a
 shell on the board (port-23 backdoor or serial), transfer both, `mtdwrite user.squashfs /dev/mtd5`, reboot.
 
-### Current state (2026-07-22)
-- **On the physical board (flashed) = `ccd32603`**: screen (off by default) + OSD timestamp + focus assist (full-frame)
-- **Latest in this repo = `e6968f3f`** (`user.squashfs` is this build): adds **center-spot focus + focus box + focus value drawn on the video**; compiled + tested on /tmp, **not yet flashed**
-- **Next = NPU / YOLO**: the NPU driver is already up on the board; the SDK ships yolov8/v5 `.om` models + the `svp_acl` runtime — integration pending
+### Current state (2026-07-26)
+- **On the physical board (flashed) = `abb97db7`** (`user.squashfs` is this build, 11.6MB): **NPU object detection is in flash and reboot-verified**
+  - YOLOv8n + YOLOv7 both shipped in flash (`/opt/model/`), **hot-swappable** from the web "AI" tab (~2s)
+  - **16ms** per inference (yolov8n) / **24ms** (yolov7), every 3rd frame; load is the same as with detection off
+  - Boxes + class names + scores are **drawn into the video** (720p preview / MJPEG / DSI panel); score threshold, NMS and a class whitelist are all web-adjustable
+  - **letterbox fix**: the 4K 16:9 frame is scaled to 640x360 and grey-padded into 640x640 instead of being squashed (a lamp used to come out as "toothbrush")
+  - Output tensor names are **auto-detected** (the `X`/`X_` pair), so any yolo-family `.om` drops in without code changes
+- **Model conversion**: `.om` is a PICO-format offline artifact — **PC-side only** (CANN `atc` + `amct` from SVP_PC, x86_64). The `svp_acl` runtime only has load entry points; the board cannot compile models.
+- **Next**: task-specific models (face / pets) + moving the ISP AF statistics window onto the detection box (step 1 toward focus tracking)
 
 ### Key rules
 - Must build with `SENSOR0_TYPE=SONY_IMX678_MIPI_8M_30FPS_12BIT` (default is the wrong sensor → no image)

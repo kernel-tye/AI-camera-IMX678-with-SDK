@@ -34,6 +34,15 @@ mkdir -p "$HERE/opt_build/bin"
 cp "$VENC/sample_venc" "$HERE/opt_build/bin/sample_venc"
 chmod +x "$HERE/opt_build/bin/sample_venc"
 
+# NPU 运行库 + 模型: 直接从 SDK 取(仓库里不放, 省 12MB). libsvp_acl 是静态链进
+# sample_venc 的, 但它运行时会 dlopen libsvp_aicpu.so, 所以这几个 .so 必须进 /opt/lib
+cp -P "$SRC"/out/lib/libsvp_acl.so "$SRC"/out/lib/libsvp_acl_sec.so \
+      "$SRC"/out/lib/libsvp_aicpu.so "$SRC"/out/lib/libprotobuf-c.so* "$HERE/opt_build/lib/"
+mkdir -p "$HERE/opt_build/model"
+for m in yolov8 yolov7; do
+    cp "$SRC/mpp/sample/svp/svp_npu/data/model/$m.om" "$HERE/opt_build/model/"
+done
+
 echo "[4/4] 打包 squashfs (xz, 256K block —— 与板子一致) ..."
 rm -f "$HERE/user.squashfs"
 mksquashfs "$HERE/opt_build" "$HERE/user.squashfs" -comp xz -b 262144 -noappend -no-progress
