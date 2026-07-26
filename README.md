@@ -26,7 +26,10 @@ cd /path/to/.../a55_linux/source/mpp/sample/venc/tianyuan_pkg && ./build_firmwar
 传这两个文件 → `mtdwrite user.squashfs /dev/mtd5` → reboot。
 
 ### 当前状态（2026-07-26）
-- **flash 里(物理板子在跑)= `abb97db7`**(`user.squashfs` 即此版, 11.6MB):**NPU 目标检测已固化并重启验证**
+- **flash 里(物理板子在跑)= `97e58889`**(`user.squashfs` 即此版, 11.6MB):**NPU 检测 + 相机手动挡已固化并重启验证**
+  - **曝光 P/S/M 三挡**:S 只锁快门(增益仍自动), M 快门+增益全锁死(实测 1/1000s ISO 100 平均亮度掉到 1);曝光补偿 / 自动挡最长快门可调;读回当前快门/增益/ISO/帧率/平均亮度
+  - **亮度直方图**(ISP 硬件 1024bin 归 64 格, `/hist`)
+  - **对焦区跟 AI 主体走**:AF 统计从固定中心 3x3 改成跟检测框(映射到 15x17 网格), 画面上黄框实时跟随 —— 换人脸模型即是眼控对焦
   - YOLOv8n / YOLOv7 两个模型进 flash(`/opt/model/`),网页「AI 检测」页可**热切换**(约 2 秒)
   - 推理 **16ms**(yolov8n) / **24ms**(yolov7),每 3 帧一次,load 与不开检测基本持平
   - 框+类别名+置信度**画进画面**(720p 预览/MJPEG/DSI 屏都可见),置信度门槛 / NMS / 类别白名单网页可调
@@ -81,7 +84,10 @@ cd /path/to/.../a55_linux/source/mpp/sample/venc/tianyuan_pkg && ./build_firmwar
 shell on the board (port-23 backdoor or serial), transfer both, `mtdwrite user.squashfs /dev/mtd5`, reboot.
 
 ### Current state (2026-07-26)
-- **On the physical board (flashed) = `abb97db7`** (`user.squashfs` is this build, 11.6MB): **NPU object detection is in flash and reboot-verified**
+- **On the physical board (flashed) = `97e58889`** (`user.squashfs` is this build, 11.6MB): **NPU detection + manual camera controls are in flash and reboot-verified**
+  - **P/S/M exposure modes** (S locks shutter only, M locks shutter+gain: verified 1/1000s → ISO 100, mean luma 1), AE compensation, max auto shutter, and live read-back of shutter/gain/ISO/fps/mean-luma
+  - **Luma histogram** (ISP 1024-bin hardware stats binned to 64, `/hist`)
+  - **AF window follows the AI subject**: the AF statistics window moves from the fixed centre 3x3 onto the detection box (mapped to the 15x17 grid); a yellow box tracks it on screen — swap in a face model and this becomes eye AF
   - YOLOv8n + YOLOv7 both shipped in flash (`/opt/model/`), **hot-swappable** from the web "AI" tab (~2s)
   - **16ms** per inference (yolov8n) / **24ms** (yolov7), every 3rd frame; load is the same as with detection off
   - Boxes + class names + scores are **drawn into the video** (720p preview / MJPEG / DSI panel); score threshold, NMS and a class whitelist are all web-adjustable

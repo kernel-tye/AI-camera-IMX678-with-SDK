@@ -3104,6 +3104,7 @@ EXIT_SYS_STOP:
 #include <pthread.h>
 #include <stdint.h>
 #include "ot_mpi_isp.h"
+#include "ot_mpi_ae.h"        /* 手动曝光: get/set_exposure_attr, query_exposure_info */
 
 /* newest JPEG frame, shared: one reader thread fills, many HTTP clients read */
 static unsigned char g_web_jpeg[1024 * 1024];
@@ -3341,6 +3342,30 @@ static const char g_web_html[] =
 "      <div class=\"btnrow\"><button class=\"btn g\" onclick=\"imgSave()\">💾 保存设置（重启保留）</button></div>"
 "      <div class=\"msg\" id=\"imgmsg\"></div>"
 "    </div>"
+"    <div class=\"card\"><h4>📷 曝光（相机手动挡）</h4>"
+"      <div class=\"pvmini\"><div class=\"pm\"><span>快门</span><b id=\"e_sh\">--</b></div>"
+"        <div class=\"pm\"><span>增益</span><b id=\"e_ga\">--</b></div>"
+"        <div class=\"pm\"><span>ISO</span><b id=\"e_iso\">--</b></div>"
+"        <div class=\"pm\"><span>帧率</span><b id=\"e_fps\">--</b></div>"
+"        <div class=\"pm\"><span>平均亮度</span><b id=\"e_lum\">--</b></div></div>"
+"      <canvas id=\"histc\" width=\"256\" height=\"72\" style=\"width:100%;height:72px;margin-top:10px;background:#0d1117;border:1px solid var(--line);border-radius:8px\"></canvas>"
+"      <div class=\"fld\" style=\"margin-top:10px\"><label>曝光挡位</label><select id=\"e_man\">"
+"        <option value=\"0\">P · 自动</option><option value=\"1\">S · 快门优先（增益仍自动）</option>"
+"        <option value=\"2\">M · 全手动（快门+增益锁死）</option></select></div>"
+"      <div class=\"fld\"><label>快门</label><select id=\"e_us\">"
+"        <option value=\"125\">1/8000</option><option value=\"250\">1/4000</option><option value=\"500\">1/2000</option>"
+"        <option value=\"1000\">1/1000</option><option value=\"2000\">1/500</option><option value=\"4000\">1/250</option>"
+"        <option value=\"8000\">1/125</option><option value=\"16667\">1/60</option><option value=\"20000\">1/50</option>"
+"        <option value=\"33333\">1/30</option><option value=\"66667\">1/15</option><option value=\"200000\">1/5</option>"
+"        <option value=\"1000000\">1s</option></select></div>"
+"      <div class=\"row\"><label>增益</label><input type=range min=100 max=3200 step=100 value=100 id=e_gain><span class=val id=e_gainv>1.0x</span></div>"
+"      <div class=\"row\"><label>曝光补偿（自动挡）</label><input type=range min=0 max=255 step=4 value=56 id=e_comp><span class=val id=e_compv>56</span></div>"
+"      <div class=\"fld\"><label>自动挡最长快门（防暗处拖影）</label><select id=\"e_max\">"
+"        <option value=\"0\">不限制</option><option value=\"8000\">1/125</option><option value=\"16667\">1/60</option>"
+"        <option value=\"33333\">1/30</option><option value=\"66667\">1/15</option></select></div>"
+"      <div class=\"btnrow\"><button class=\"btn g\" onclick=\"saveExp()\">应用并保存</button></div>"
+"      <div class=\"msg\" id=\"expmsg\"></div>"
+"    </div>"
 "    <div class=\"card\"><h4>🎯 对焦助手</h4>"
 "      <div class=\"stat full\"><div class=\"k\">焦点值（越大越清晰）</div><div class=\"n\" id=\"fv_now\">--</div><div class=\"bar\"><i id=\"fv_bar\" style=\"width:0\"></i></div></div>"
 "      <div class=\"row\" style=\"margin-top:8px\"><label>峰值</label><span class=\"val\" id=\"fv_peak\">--</span></div>"
@@ -3351,6 +3376,7 @@ static const char g_web_html[] =
 "      <div class=\"sw\"><input type=\"checkbox\" id=\"osd_en\"><label for=\"osd_en\">在画面左上角叠加时间戳</label></div>"
 "      <div class=\"sw\"><input type=\"checkbox\" id=\"osd_focus\"><label for=\"osd_focus\">叠加焦点值+对焦条（对焦时用，看着屏幕拧镜头）</label></div>"
 "      <div class=\"sw\"><input type=\"checkbox\" id=\"focus_spot\" checked><label for=\"focus_spot\">点对焦（只测画面中心，并画框）——取消则全画幅平均</label></div>"
+"      <div class=\"sw\"><input type=\"checkbox\" id=\"focus_follow\"><label for=\"focus_follow\">对焦区跟着 AI 检测的主体走（黄框＝正在测它）</label></div>"
 "      <div class=\"btnrow\"><button class=\"btn g\" onclick=\"saveOsd()\">保存并生效</button></div>"
 "      <div class=\"msg\" id=\"osdmsg\"></div>"
 "      <small style=\"color:var(--mut)\">叠加到主码流(4K)与网页预览；时间取设备时钟(见「时间」页)。焦点条会随清晰度峰化。</small>"
@@ -3472,14 +3498,15 @@ static const char g_web_html[] =
 "  if(started)return;started=true;"
 "  $('v').src='/stream';pollInfo();"
 "  setInterval(function(){if($('sys').classList.contains('on'))pollInfo();else beat();if($('gpio').classList.contains('on'))pollGpio();},3000);"
-"  setInterval(function(){if($('time').classList.contains('on'))pollTime();if($('ai').classList.contains('on'))pollNpu()},1000);"
+"  setInterval(function(){if($('time').classList.contains('on'))pollTime();if($('ai').classList.contains('on'))pollNpu();"
+"    if($('img').classList.contains('on'))pollExp()},1000);"
 "}"
 "/* tabs */"
 "document.querySelectorAll('#nav button').forEach(function(b){b.onclick=function(){"
 "  document.querySelectorAll('#nav button').forEach(function(x){x.classList.remove('on')});b.classList.add('on');"
 "  document.querySelectorAll('.tab').forEach(function(x){x.classList.remove('on')});$(b.dataset.t).classList.add('on');"
 "  if(b.dataset.t=='sys'){pollInfo();loadNet();}if(b.dataset.t=='time')pollTime();if(b.dataset.t=='rtsp')loadRtsp();if(b.dataset.t=='reg')pollReg();if(b.dataset.t=='gpio')pollGpio();if(b.dataset.t=='scr')loadScr();"
-"  if(b.dataset.t=='img'){$('v2').src='/stream?'+Date.now();loadOsd();}else{if($('v2'))$('v2').removeAttribute('src');fvStop();}"
+"  if(b.dataset.t=='img'){$('v2').src='/stream?'+Date.now();loadOsd();loadExp();pollExp();}else{if($('v2'))$('v2').removeAttribute('src');fvStop();}"
 "  if(b.dataset.t=='ai'){$('v3').src='/stream?'+Date.now();loadNpu();loadModels();pollNpu();}else{if($('v3'))$('v3').removeAttribute('src');}"
 "};});"
 "/* preview */"
@@ -3552,8 +3579,27 @@ static const char g_web_html[] =
 "    $('fv_now').innerText=v;$('fv_peak').innerText=fvMax;$('fv_bar').style.width=(fvMax>0?Math.round(v/fvMax*100):0)+'%'"
 "  })['catch'](function(){})},300)}"
 "/* osd */"
-"function loadOsd(){fetch('/getosd').then(function(r){return r.json()}).then(function(j){$('osd_en').checked=!!j.en;if($('osd_focus'))$('osd_focus').checked=!!j.focus;if($('focus_spot'))$('focus_spot').checked=!!j.spot})['catch'](function(){})}"
-"function saveOsd(){fetch('/setosd?en='+($('osd_en').checked?1:0)+'&focus='+($('osd_focus').checked?1:0)+'&spot='+($('focus_spot').checked?1:0)).then(function(r){return r.text()}).then(function(t){msg('osdmsg',t)})['catch'](function(){msg('osdmsg','失败')})}"
+"function loadOsd(){fetch('/getosd').then(function(r){return r.json()}).then(function(j){$('osd_en').checked=!!j.en;if($('osd_focus'))$('osd_focus').checked=!!j.focus;if($('focus_spot'))$('focus_spot').checked=!!j.spot;if($('focus_follow'))$('focus_follow').checked=!!j.follow})['catch'](function(){})}"
+"function saveOsd(){fetch('/setosd?en='+($('osd_en').checked?1:0)+'&focus='+($('osd_focus').checked?1:0)+'&spot='+($('focus_spot').checked?1:0)+'&follow='+($('focus_follow').checked?1:0)).then(function(r){return r.text()}).then(function(t){msg('osdmsg',t)})['catch'](function(){msg('osdmsg','失败')})}"
+"/* exposure + histogram */"
+"function shTxt(us){if(us==null||us<0)return'--';if(us>=1000000)return(us/1000000).toFixed(1)+'s';return'1/'+Math.round(1000000/us)}"
+"function loadExp(){fetch('/exp').then(function(r){return r.json()}).then(function(j){"
+"  $('e_man').value=String(j.manual);$('e_gain').value=j.gain;$('e_gainv').innerText=(j.gain/100).toFixed(1)+'x';"
+"  $('e_comp').value=j.comp;$('e_compv').innerText=j.comp;"
+"  var s=$('e_us');var best=s.options[0].value,bd=1e18;for(var i=0;i<s.options.length;i++){var d=Math.abs(s.options[i].value-j.us);if(d<bd){bd=d;best=s.options[i].value}}s.value=best;"
+"  $('e_max').value=String(j.maxus);expNow(j)})['catch'](function(){})}"
+"function expNow(j){$('e_sh').innerText=shTxt(j.cur_us);$('e_ga').innerText=(j.cur_gain>=0?(j.cur_gain/100).toFixed(1)+'x':'--');"
+"  $('e_iso').innerText=(j.iso>=0?j.iso:'--');$('e_fps').innerText=(j.fps>=0?(j.fps/100).toFixed(1):'--');$('e_lum').innerText=(j.lum>=0?j.lum:'--')}"
+"function pollExp(){fetch('/exp').then(function(r){return r.json()}).then(expNow)['catch'](function(){});"
+"  fetch('/hist').then(function(r){return r.json()}).then(drawHist)['catch'](function(){})}"
+"function drawHist(j){var c=$('histc');if(!c||!c.getContext)return;var g=c.getContext('2d'),b=j.bins||[];"
+"  g.clearRect(0,0,c.width,c.height);if(!b.length)return;var mx=1;for(var i=0;i<b.length;i++){if(b[i]>mx)mx=b[i]}"
+"  var w=c.width/b.length;g.fillStyle='#3a7bd5';for(i=0;i<b.length;i++){var h=Math.round(b[i]/mx*(c.height-2));g.fillRect(i*w,c.height-h,Math.max(1,w-1),h)}"
+"  g.fillStyle='rgba(226,80,74,.85)';var hi=Math.round(b.length*0.97);for(i=hi;i<b.length;i++){var h2=Math.round(b[i]/mx*(c.height-2));g.fillRect(i*w,c.height-h2,Math.max(1,w-1),h2)}}"
+"$('e_gain').oninput=function(){$('e_gainv').innerText=($('e_gain').value/100).toFixed(1)+'x'};"
+"$('e_comp').oninput=function(){$('e_compv').innerText=$('e_comp').value};"
+"function saveExp(){var u='/setexp?manual='+$('e_man').value+'&us='+$('e_us').value+'&gain='+$('e_gain').value+'&comp='+$('e_comp').value+'&maxus='+$('e_max').value;"
+"  msg('expmsg','正在应用…');fetch(u).then(function(r){return r.text()}).then(function(t){msg('expmsg',t);setTimeout(loadExp,600)})['catch'](function(){msg('expmsg','失败')})}"
 "/* ai detect */"
 "function loadNpu(){fetch('/npu').then(function(r){return r.json()}).then(function(j){"
 "  $('npu_en').checked=!!j.en;$('npu_draw').checked=!!j.draw;$('npu_iv').value=j.interval;"
@@ -3648,6 +3694,13 @@ static int  g_osd_ready = 0;       /* region 创建+attach 成功 */
 static int  g_af_ok = 0;
 static int  g_osd_focus_en = 0;    /* 把焦点值+对焦条叠到画面上(对焦时开, 默认关) */
 static int  g_focus_spot = 1;      /* 1=中心点对焦(默认) 0=全画幅平均 */
+static int  g_focus_follow = 0;    /* 1=对焦测量区跟着 NPU 检测到的主体走(眼控/脸控对焦的基础) */
+/* 手动曝光 (ISP AE). 相机就得能手动. gain 用"倍数×100"存(100=1.0x), 对上 ISP 的 22.10 定点 */
+static int  g_exp_manual = 0;      /* 曝光挡位: 0=自动P  1=快门优先S(快门手动/增益自动)  2=全手动M */
+static int  g_exp_us = 20000;      /* 手动快门, 微秒 (20000us = 1/50s) */
+static int  g_exp_gain = 100;      /* 手动增益 ×100 (100=1.0x, 1600=16x) */
+static int  g_exp_comp = 56;       /* 自动模式下的曝光补偿 0..255 (ISP 默认 56) */
+static int  g_exp_maxus = 0;       /* 自动模式下最长快门(微秒), 0=不限制. 防止暗处糊成一片 */
 static unsigned long long g_focus_peak = 0;  /* 对焦条峰值(缩放用) */
 /* NPU 目标检测 (YOLOv8, svp_acl). g_npu_en=配置开关; g_npu_interval=每N帧推一次 */
 static int  g_npu_en = 1;          /* 默认开(本机就叫 AI camera); web「AI检测」页可关 */
@@ -3694,11 +3747,13 @@ static void cam_cfg_save(void)
     fprintf(f, "user=%s\npass=%s\nrtsp_auth=%d\nip=%s\nmask=%s\ngw=%s\nluma=%d\ncontr=%d\nsatu=%d\nhue=%d\n"
                "scr_en=%d\nscr_bright=%d\nscr_src=%d\nscr_lr=%d\nosd_en=%d\nosd_focus=%d\nfocus_spot=%d\n"
                "npu_en=%d\nnpu_interval=%d\nnpu_draw=%d\nnpu_score=%d\nnpu_cls=%s\nnpu_nms=%d\n"
-               "npu_model=%s\n",
+               "npu_model=%s\nfocus_follow=%d\n"
+               "exp_manual=%d\nexp_us=%d\nexp_gain=%d\nexp_comp=%d\nexp_maxus=%d\n",
         g_cam_user, g_cam_pass, g_rtsp_auth_en, g_net_ip, g_net_mask, g_net_gw,
         g_isp_luma, g_isp_contr, g_isp_satu, g_isp_hue,
         g_scr_en, g_scr_bright, g_scr_src, g_scr_lr, g_osd_en, g_osd_focus_en, g_focus_spot,
-        g_npu_en, g_npu_interval, g_npu_draw, g_npu_score, g_npu_cls, g_npu_nms, g_npu_model);
+        g_npu_en, g_npu_interval, g_npu_draw, g_npu_score, g_npu_cls, g_npu_nms, g_npu_model,
+        g_focus_follow, g_exp_manual, g_exp_us, g_exp_gain, g_exp_comp, g_exp_maxus);
     pthread_mutex_unlock(&g_cfg_lock);
     fclose(f);
 }
@@ -3735,6 +3790,12 @@ static void cam_cfg_load(void)
         else if (!strncmp(line, "npu_cls=", 8)) { snprintf(g_npu_cls, sizeof(g_npu_cls), "%s", line + 8); }
         else if (!strncmp(line, "npu_nms=", 8)) { g_npu_nms = atoi(line + 8); if (g_npu_nms < 5) { g_npu_nms = 5; } if (g_npu_nms > 95) { g_npu_nms = 95; } }
         else if (!strncmp(line, "npu_model=", 10)) { if (line[10] != '\0') { snprintf(g_npu_model, sizeof(g_npu_model), "%s", line + 10); } }
+        else if (!strncmp(line, "focus_follow=", 13)) { g_focus_follow = atoi(line + 13) ? 1 : 0; }
+        else if (!strncmp(line, "exp_manual=", 11)) { g_exp_manual = atoi(line + 11) ? 1 : 0; }
+        else if (!strncmp(line, "exp_us=", 7)) { g_exp_us = atoi(line + 7); }
+        else if (!strncmp(line, "exp_gain=", 9)) { g_exp_gain = atoi(line + 9); }
+        else if (!strncmp(line, "exp_comp=", 9)) { g_exp_comp = atoi(line + 9); }
+        else if (!strncmp(line, "exp_maxus=", 10)) { g_exp_maxus = atoi(line + 10); }
     }
     pthread_mutex_unlock(&g_cfg_lock);
     fclose(f);
@@ -3937,7 +3998,83 @@ static void cam_af_enable(void)
 #define FOCUS_SPOT_R1 8
 #define FOCUS_SPOT_C0 7
 #define FOCUS_SPOT_C1 9
-/* 焦点值 = 所选区分区 (h1+h2+v1+v2) 之和; 越大越锐. g_focus_spot=1 只算中心块, 0 算全画幅. 失败 -1 */
+/* ===== 手动曝光 (ISP AE) =====
+ * 相机就得能定快门定增益. ISP 的 ot_isp_exposure_attr:
+ *   op_type = AUTO/MANUAL 总开关; manual_attr 里每一项还能各自 AUTO/MANUAL
+ *   exp_time 单位微秒; a_gain 是 22.10 定点 (0x400 = 1.0x)
+ * 自动模式下我们只改两样有用的: 曝光补偿 compensation 和最长快门(暗处防糊).
+ * 这几个函数是"控制层", 网页/串口/按键都调它, 不各自去碰 ISP. */
+#define EXP_GAIN_ONE 1024u                 /* 22.10 定点的 1.0x */
+
+static int cam_exp_apply(void)
+{
+    ot_isp_exposure_attr ea;
+    if (ot_mpi_isp_get_exposure_attr(0, &ea) != TD_SUCCESS) { return -1; }
+    if (g_exp_manual) {
+        /* S 挡只锁快门, 增益仍由 AE 补(所以画面亮度不变, ISO 会飙);
+         * M 挡把模拟/数字增益全锁死, 定多少就是多少 —— 拍照要的是这个 */
+        int full = (g_exp_manual >= 2);
+        ea.op_type = OT_OP_MODE_MANUAL;
+        ea.manual_attr.exp_time_op_type = OT_OP_MODE_MANUAL;
+        ea.manual_attr.a_gain_op_type   = OT_OP_MODE_MANUAL;
+        ea.manual_attr.d_gain_op_type    = full ? OT_OP_MODE_MANUAL : OT_OP_MODE_AUTO;
+        ea.manual_attr.ispd_gain_op_type = full ? OT_OP_MODE_MANUAL : OT_OP_MODE_AUTO;
+        ea.manual_attr.exp_time = (td_u32)((g_exp_us > 0) ? g_exp_us : 1);
+        ea.manual_attr.a_gain = (td_u32)((unsigned long long)g_exp_gain * EXP_GAIN_ONE / 100u);
+        if (ea.manual_attr.a_gain < EXP_GAIN_ONE) { ea.manual_attr.a_gain = EXP_GAIN_ONE; }
+        if (full) {
+            ea.manual_attr.d_gain = EXP_GAIN_ONE;       /* 数字增益 1.0x, 不偷偷提亮 */
+            ea.manual_attr.isp_d_gain = EXP_GAIN_ONE;
+        }
+    } else {
+        ea.op_type = OT_OP_MODE_AUTO;
+        ea.auto_attr.compensation = (td_u8)((g_exp_comp < 0) ? 0 : ((g_exp_comp > 255) ? 255 : g_exp_comp));
+        if (g_exp_maxus > 0) { ea.auto_attr.exp_time_range.max = (td_u32)g_exp_maxus; }
+    }
+    if (ot_mpi_isp_set_exposure_attr(0, &ea) != TD_SUCCESS) { return -1; }
+    return 0;
+}
+
+/* 读回 ISP 实际生效的曝光(自动模式下就是 AE 算出来的), 网页显示"当前快门/增益/ISO/帧率/平均亮度" */
+typedef struct { int us, gain_x100, iso, fps, lum; } cam_exp_now;
+static void cam_exp_read(cam_exp_now *n)
+{
+    ot_isp_exp_info info;
+    n->us = -1; n->gain_x100 = -1; n->iso = -1; n->fps = -1; n->lum = -1;
+    if (ot_mpi_isp_query_exposure_info(0, &info) != TD_SUCCESS) { return; }
+    n->us = (int)info.exp_time;
+    n->gain_x100 = (int)((unsigned long long)info.a_gain * 100u / EXP_GAIN_ONE);
+    n->iso = (int)info.iso;
+    n->fps = (int)info.fps;
+    n->lum = (int)info.ave_lum;
+}
+
+/* 亮度直方图: ISP 硬件给 1024 bin, 归到 64 格返回 (画面/网页都用得上) */
+#define HIST_BINS 64
+static int cam_hist_get(unsigned int out[HIST_BINS])
+{
+    static ot_isp_ae_stats st;      /* 结构挺大(几十KB), 放静态别爆线程栈 */
+    static pthread_mutex_t lock = PTHREAD_MUTEX_INITIALIZER;
+    int i, k;
+    unsigned long long total = 0;
+    pthread_mutex_lock(&lock);
+    if (ot_mpi_isp_get_ae_stats(0, &st) != TD_SUCCESS) { pthread_mutex_unlock(&lock); return -1; }
+    for (i = 0; i < HIST_BINS; i++) { out[i] = 0; }
+    for (i = 0; i < OT_ISP_HIST_NUM; i++) {
+        k = i * HIST_BINS / OT_ISP_HIST_NUM;
+        out[k] += st.be_hist1024_value[i];
+        total += st.be_hist1024_value[i];
+    }
+    pthread_mutex_unlock(&lock);
+    return (total > 0) ? 0 : -1;
+}
+
+/* 对焦测量区(AF 统计的 15x17 网格里的一块矩形). 三种来源:
+ *   跟主体(g_focus_follow 且有检测框) > 中心块(g_focus_spot) > 全画幅
+ * 输出的 4 个格子号也给画面用, 这样"框在哪就量哪"看得见. 返回 1=跟着主体 */
+static int cam_focus_zone(int *pr0, int *pr1, int *pc0, int *pc1);
+
+/* 焦点值 = 所选区分区 (h1+h2+v1+v2) 之和; 越大越锐. 失败 -1 */
 static long long cam_focus_value(void)
 {
     ot_isp_af_stats af;
@@ -3945,11 +4082,7 @@ static long long cam_focus_value(void)
     unsigned long long s = 0;
     if (!g_af_ok) { return -1; }
     if (ot_mpi_isp_get_focus_stats(0, &af) != TD_SUCCESS) { return -1; }
-    if (g_focus_spot) {
-        r0 = FOCUS_SPOT_R0; r1 = FOCUS_SPOT_R1; c0 = FOCUS_SPOT_C0; c1 = FOCUS_SPOT_C1;
-    } else {
-        r0 = 0; r1 = OT_ISP_AF_ZONE_ROW - 1; c0 = 0; c1 = OT_ISP_AF_ZONE_COLUMN - 1;
-    }
+    (td_void)cam_focus_zone(&r0, &r1, &c0, &c1);
     for (r = r0; r <= r1; r++) {
         for (c = c0; c <= c1; c++) {
             ot_isp_focus_zone *z = &af.be_af_stat.zone_metrics[r][c];
@@ -4493,9 +4626,69 @@ static void cam_http_focus(int fd)
 
 static void cam_http_getosd(int fd)
 {
-    char j[80]; int n;
-    n = snprintf(j, sizeof(j), "{\"en\":%d,\"ready\":%d,\"focus\":%d,\"spot\":%d}",
-                 g_osd_en, g_osd_ready, g_osd_focus_en, g_focus_spot);
+    char j[110]; int n;
+    n = snprintf(j, sizeof(j), "{\"en\":%d,\"ready\":%d,\"focus\":%d,\"spot\":%d,\"follow\":%d}",
+                 g_osd_en, g_osd_ready, g_osd_focus_en, g_focus_spot, g_focus_follow);
+    cam_http_body(fd, "application/json", j, n);
+}
+
+/* GET /exp -> 曝光设置 + 当前实际值(快门/增益/ISO/帧率/平均亮度) */
+static void cam_http_exp(int fd)
+{
+    char j[256]; int n;
+    cam_exp_now now;
+    cam_exp_read(&now);
+    n = snprintf(j, sizeof(j),
+        "{\"manual\":%d,\"us\":%d,\"gain\":%d,\"comp\":%d,\"maxus\":%d,"
+        "\"cur_us\":%d,\"cur_gain\":%d,\"iso\":%d,\"fps\":%d,\"lum\":%d}",
+        g_exp_manual, g_exp_us, g_exp_gain, g_exp_comp, g_exp_maxus,
+        now.us, now.gain_x100, now.iso, now.fps, now.lum);
+    cam_http_body(fd, "application/json", j, n);
+}
+
+/* GET /setexp?manual=&us=&gain=&comp=&maxus= : 立即生效 + 存 param */
+static void cam_http_setexp(int fd, const char *req)
+{
+    char v[24];
+    int changed = 0, rc;
+    if (cam_qparam(req, "manual", v, sizeof(v))) {
+        int m = atoi(v);
+        g_exp_manual = (m < 0) ? 0 : ((m > 2) ? 2 : m);   /* 0=P 1=S 2=M */
+        changed = 1;
+    }
+    if (cam_qparam(req, "us", v, sizeof(v))) {
+        int t = atoi(v);
+        if (t < 10) { t = 10; }              /* 1/100000s 以下没意义 */
+        if (t > 1000000) { t = 1000000; }    /* 1 秒上限(帧率会自动降) */
+        g_exp_us = t; changed = 1;
+    }
+    if (cam_qparam(req, "gain", v, sizeof(v))) {
+        int g = atoi(v);
+        if (g < 100) { g = 100; }            /* 1.0x 起 */
+        if (g > 6400) { g = 6400; }          /* 64x 顶 */
+        g_exp_gain = g; changed = 1;
+    }
+    if (cam_qparam(req, "comp", v, sizeof(v))) { g_exp_comp = atoi(v); changed = 1; }
+    if (cam_qparam(req, "maxus", v, sizeof(v))) { g_exp_maxus = atoi(v); changed = 1; }
+    if (!changed) { cam_http_text(fd, "no change"); return; }
+    rc = cam_exp_apply();
+    cam_cfg_save();
+    cam_http_text(fd, (rc == 0) ? "\xe5\xb7\xb2\xe5\xba\x94\xe7\x94\xa8"      /* 已应用 */
+                                : "ISP \xe6\x8b\x92\xe7\xbb\x9d");            /* ISP 拒绝 */
+}
+
+/* GET /hist -> 64 格亮度直方图 (ISP 硬件 1024 bin 归并) */
+static void cam_http_hist(int fd)
+{
+    unsigned int b[HIST_BINS];
+    char j[720];
+    int n = 0, i;
+    if (cam_hist_get(b) != 0) { cam_http_body(fd, "application/json", "{\"bins\":[]}", 11); return; }
+    n += snprintf(j + n, sizeof(j) - n, "{\"bins\":[");
+    for (i = 0; i < HIST_BINS && n < (int)sizeof(j) - 16; i++) {
+        n += snprintf(j + n, sizeof(j) - n, "%s%u", (i > 0) ? "," : "", b[i]);
+    }
+    n += snprintf(j + n, sizeof(j) - n, "]}");
     cam_http_body(fd, "application/json", j, n);
 }
 
@@ -4522,6 +4715,13 @@ static void cam_http_setosd(int fd, const char *req)
         g_focus_spot = atoi(v) ? 1 : 0;
         pthread_mutex_unlock(&g_cfg_lock);
         g_focus_peak = 0;   /* 切换测量区域, 峰值重置 */
+        changed = 1;
+    }
+    if (cam_qparam(req, "follow", v, sizeof(v))) {     /* 对焦区跟检测主体走 */
+        pthread_mutex_lock(&g_cfg_lock);
+        g_focus_follow = atoi(v) ? 1 : 0;
+        pthread_mutex_unlock(&g_cfg_lock);
+        g_focus_peak = 0;
         changed = 1;
     }
     if (changed) { cam_cfg_save(); cam_osd_update(); }   /* 立即生效 */
@@ -4840,7 +5040,8 @@ static void *web_client_thread(void *arg)
                    strstr(req, "GET /focus") != TD_NULL || strstr(req, "GET /getosd") != TD_NULL ||
                    strstr(req, "GET /setosd") != TD_NULL ||
                    strstr(req, "GET /npu") != TD_NULL || strstr(req, "GET /setnpu") != TD_NULL ||
-                   strstr(req, "GET /models") != TD_NULL ||
+                   strstr(req, "GET /models") != TD_NULL || strstr(req, "GET /hist") != TD_NULL ||
+                   strstr(req, "GET /exp") != TD_NULL || strstr(req, "GET /setexp") != TD_NULL ||
                    strstr(req, "GET /exec") != TD_NULL) {
             if (!authed) {
                 cam_http_401(fd);
@@ -4888,6 +5089,12 @@ static void *web_client_thread(void *arg)
                 cam_http_setosd(fd, req);
             } else if (strstr(req, "GET /models") != TD_NULL) {
                 cam_http_models(fd);
+            } else if (strstr(req, "GET /setexp") != TD_NULL) {   /* 必须排在 /exp 和 /set 前 */
+                cam_http_setexp(fd, req);
+            } else if (strstr(req, "GET /exp") != TD_NULL) {
+                cam_http_exp(fd);
+            } else if (strstr(req, "GET /hist") != TD_NULL) {
+                cam_http_hist(fd);
             } else if (strstr(req, "GET /setnpu") != TD_NULL) {   /* 必须排在 /npu 和 /set 前 */
                 cam_http_setnpu(fd, req);
             } else if (strstr(req, "GET /npu") != TD_NULL) {
@@ -5689,6 +5896,42 @@ static void cam_chn2_rgn_init(void)
     printf("[osd] chn2 overlay up (%dx%d: 时间戳+对焦+检测框)\n", DET_W, DET_H);
 }
 
+/* 对焦测量区: 跟主体(检测框最大的那个) > 中心块 > 全画幅. 返回 1 = 正跟着主体 */
+static int cam_focus_zone(int *pr0, int *pr1, int *pc0, int *pc1)
+{
+    int r0 = FOCUS_SPOT_R0, r1 = FOCUS_SPOT_R1, c0 = FOCUS_SPOT_C0, c1 = FOCUS_SPOT_C1;
+    int follow = 0;
+    if (g_focus_follow) {
+        cam_npu_box b;
+        int i, best = -1;
+        long long area = 0;
+        pthread_mutex_lock(&g_npu_lock);
+        for (i = 0; i < g_npu_box_n && i < NPU_MAX_DET; i++) {   /* 主体 = 面积最大的框 */
+            long long a = (long long)(g_npu_box[i].x1 - g_npu_box[i].x0) *
+                          (g_npu_box[i].y1 - g_npu_box[i].y0);
+            if (a > area) { area = a; best = i; }
+        }
+        if (best >= 0) { b = g_npu_box[best]; }
+        pthread_mutex_unlock(&g_npu_lock);
+        if (best >= 0 && area > 0) {   /* 千分比 -> AF 统计网格 (15 行 x 17 列) */
+            c0 = b.x0 * OT_ISP_AF_ZONE_COLUMN / 1000;
+            c1 = b.x1 * OT_ISP_AF_ZONE_COLUMN / 1000;
+            r0 = b.y0 * OT_ISP_AF_ZONE_ROW / 1000;
+            r1 = b.y1 * OT_ISP_AF_ZONE_ROW / 1000;
+            if (c1 >= OT_ISP_AF_ZONE_COLUMN) { c1 = OT_ISP_AF_ZONE_COLUMN - 1; }
+            if (r1 >= OT_ISP_AF_ZONE_ROW) { r1 = OT_ISP_AF_ZONE_ROW - 1; }
+            if (c1 < c0) { c1 = c0; }
+            if (r1 < r0) { r1 = r0; }
+            follow = 1;
+        }
+    }
+    if (!follow && !g_focus_spot) {
+        r0 = 0; r1 = OT_ISP_AF_ZONE_ROW - 1; c0 = 0; c1 = OT_ISP_AF_ZONE_COLUMN - 1;
+    }
+    *pr0 = r0; *pr1 = r1; *pc0 = c0; *pc1 = c1;
+    return follow;
+}
+
 /* 重画 chn2 叠加层: 时间戳 + 焦点值/对焦条 + 中心对焦框 + 检测框. 由 OSD 线程单独调用
  * (单一写者, 免得和推理线程抢 region 画布). 全清后重画, 关掉的项自然消失. */
 static void cam_chn2_draw(void)
@@ -5726,11 +5969,14 @@ static void cam_chn2_draw(void)
         cam_txt_blit(base, stride, DET_W, DET_H, DET_OX, DET_OY + OSD_L2_Y, buf, OSD_SCALE, 0xFFFF);
         frac = (g_focus_peak > 0) ? (double)fv / (double)g_focus_peak : 0.0;
         cam_osd_bar(base, stride, DET_OX, DET_OY + OSD_BAR_Y, OSD_W, OSD_BAR_H, frac);
-        if (g_focus_spot) {                           /* 中心测量区的框 */
-            cam_det_rect(base, stride, DET_W, DET_H,
-                BOX_X, BOX_Y, BOX_X + BOX_W, BOX_Y + BOX_H, 2, 0xFFFF);
-            cam_det_rect(base, stride, DET_W, DET_H,
-                BOX_X - 2, BOX_Y - 2, BOX_X + BOX_W + 2, BOX_Y + BOX_H + 2, 1, 0x8000);
+        if (g_focus_spot || g_focus_follow) {          /* 把"正在测哪块"画出来(跟主体时会跟着动) */
+            int fr0, fr1, fc0, fc1;
+            int fol = cam_focus_zone(&fr0, &fr1, &fc0, &fc1);
+            int x0 = fc0 * DET_W / OT_ISP_AF_ZONE_COLUMN, x1 = (fc1 + 1) * DET_W / OT_ISP_AF_ZONE_COLUMN;
+            int y0 = fr0 * DET_H / OT_ISP_AF_ZONE_ROW,    y1 = (fr1 + 1) * DET_H / OT_ISP_AF_ZONE_ROW;
+            unsigned short fc = fol ? 0xFFE0 : 0xFFFF;   /* 跟主体时画黄框, 中心块画白框 */
+            cam_det_rect(base, stride, DET_W, DET_H, x0, y0, x1, y1, 2, fc);
+            cam_det_rect(base, stride, DET_W, DET_H, x0 - 2, y0 - 2, x1 + 2, y1 + 2, 1, 0x8000);
         }
     }
     if (g_npu_en && g_npu_draw) {
@@ -6461,6 +6707,7 @@ static td_s32 sample_venc_web(td_void)
 
     /* 对焦助手: 启用 ISP AF 焦点统计(非致命). OSD: 建 region + 起每秒刷新线程. */
     cam_af_enable();
+    (td_void)cam_exp_apply();       /* 恢复上次的曝光设置(手动挡/补偿/最长快门) */
     cam_osd_init();
     { pthread_t osd_th; pthread_create(&osd_th, TD_NULL, cam_osd_thread, TD_NULL); }
 
