@@ -25,7 +25,28 @@ cd /path/to/.../a55_linux/source/mpp/sample/venc/tianyuan_pkg && ./build_firmwar
 **只想重刷相机、不改代码?** 光靠 `user.squashfs` + `mtdwrite` 即可,**不需要 SDK**:板子进 port-23 后门或串口 →
 传这两个文件 → `mtdwrite user.squashfs /dev/mtd5` → reboot。
 
-### 当前状态（2026-07-26）
+### 当前状态（2026-07-29）
+
+> ⚠️ **仓库领先 flash 一个版本**:`src/` 已含人脸检测 / 眼控对焦 / 峰值描边 / 斑马纹,
+> 编译通过并在板子 `/tmp` 上跑通验证,但**还没固化**。flash 里仍是 `97e58889`,
+> `user.squashfs` 也还是那一版。要用新功能得重新 `build_firmware.sh` + 烧 mtd5。
+
+#### 已验证但未固化（2026-07-29）
+- **人脸检测**:`yunet_face_aipp.om`(YuNet, 265KB)—— 裸输出,解码 + NMS 在 A55 上做。
+  **推理仅 2-3ms**(yolov7 是 24ms)。载入时按输出张量名**自动判型**(`cls_8/bbox_8/obj_8/kps_8` → YuNet),
+  换模型不用改代码。实测检出率 146/150 帧,置信度 ~60%
+- **眼控对焦**:YuNet 给 5 个关键点,前两个是双眼 → AF 统计窗缩到双眼中点附近(叠加层画青框)。
+  实测焦点值从 7300 → 19341,跟焦确实生效
+- **AIPP**:转模型时 `--insert_op_conf=tools_atc/aipp_yvu.cfg` 让 NPU **片上**做 YVU420SP→BGR,
+  输入仍是 uint8 YUV(614400 字节 stride 640)→ **沿用零拷贝喂法**,不用在 A55 上每帧转 4.9MB float
+- **峰值对焦描边**(梯度超门槛描红,灵敏度 1-100)+ **过曝斑马纹**(Y 超门槛打 45° 斜纹)。
+  两者与检测共用 VPSS 扩展通道(640x360,多消费者),抓图肉眼验证正确
+- **修 `cam_qparam()` 后缀撞车**:裸 `strstr("键=")` 会让 `th` 撞上 `zth`、`us` 撞上 `maxus`
+  (`/setexp?maxus=5000` 会连手动快门一起改掉)。改为校验匹配点前一字符是 `?` 或 `&`
+- **`MANIFEST` 与 `src/` 对齐**:补上了 `venc/Makefile` + `sample_common_svp_npu{,_model}.{c,h}`
+  —— 之前 `apply.sh` 覆盖纯净 SDK 时会漏掉它们,编不出 NPU 版
+
+#### flash 里那一版（`97e58889`, 2026-07-26）
 - **flash 里(物理板子在跑)= `97e58889`**(`user.squashfs` 即此版, 11.6MB):**NPU 检测 + 相机手动挡已固化并重启验证**
   - **曝光 P/S/M 三挡**:S 只锁快门(增益仍自动), M 快门+增益全锁死(实测 1/1000s ISO 100 平均亮度掉到 1);曝光补偿 / 自动挡最长快门可调;读回当前快门/增益/ISO/帧率/平均亮度
   - **亮度直方图**(ISP 硬件 1024bin 归 64 格, `/hist`)
@@ -37,7 +58,7 @@ cd /path/to/.../a55_linux/source/mpp/sample/venc/tianyuan_pkg && ./build_firmwar
   - 输出张量名**自动识别**(配对 `X`/`X_`),换任何 yolo 系 `.om` 都不用改代码
 - **模型转换**:`.om` 是 PICO 格式离线产物,**只能 PC 端转**(SVP_PC 里的 CANN `atc` + `amct`,x86_64);
   `svp_acl` 运行时只有 load 接口,板子上转不了
-- **下一步**:专精模型(人脸/宠物)+ AF 统计窗口跟检测框走(追焦第一步)
+- **下一步**:把上面那批已验证的改动**固化到 mtd5**;白平衡手动 / RAW 抓拍 / EXIF / 录像
 
 ### 目录 / Layout
 | 路径 | 说明 |

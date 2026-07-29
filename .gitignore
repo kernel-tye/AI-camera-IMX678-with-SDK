@@ -1,4 +1,6 @@
 *.bak-*
+__pycache__/
+*.pyc
 opt_build/
 src_changes/
 *.o

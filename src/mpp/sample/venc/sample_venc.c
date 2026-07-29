@@ -3294,12 +3294,13 @@ static const char g_web_html[] =
 "    </div>"
 "  </section>"
 "  <section class=\"tab\" id=\"ai\">"
-"    <div class=\"card\"><h4>🤖 AI 目标检测（YOLOv8 · NPU）</h4>"
+"    <div class=\"card\"><h4>🤖 AI 检测（NPU）</h4>"
 "      <div style=\"text-align:center;margin-bottom:12px\"><img id=\"v3\" style=\"max-width:100%;border-radius:10px;transform:rotate(180deg);background:#000;border:1px solid var(--line)\" alt=\"live\"></div>"
 "      <div class=\"pvmini\">"
 "        <div class=\"pm\"><span>目标数</span><b id=\"ai_n\">--</b></div>"
 "        <div class=\"pm\"><span>推理耗时</span><b id=\"ai_ms\">--</b></div>"
 "        <div class=\"pm\"><span>NPU</span><b id=\"ai_rdy\">--</b></div>"
+"        <div class=\"pm\"><span>模型</span><b id=\"ai_kind\">--</b></div>"
 "      </div>"
 "      <table class=\"regt\" style=\"margin-top:12px\"><thead><tr><th>#</th><th>类别</th><th>置信度</th><th>位置 x,y 尺寸</th></tr></thead>"
 "      <tbody id=\"aibody\"><tr><td colspan=\"4\" class=\"d\">等待检测…</td></tr></tbody></table>"
@@ -3329,7 +3330,9 @@ static const char g_web_html[] =
 "      <div class=\"fld\"><label>自定义类别号（逗号分隔，留空=全部）</label><input type=\"text\" id=\"npu_cls\" placeholder=\"如 0,2,15,16\"></div>"
 "      <div class=\"btnrow\"><button class=\"btn g\" onclick=\"saveNpu()\">保存并生效</button></div>"
 "      <div class=\"msg\" id=\"aimsg\"></div>"
-"      <small style=\"color:var(--mut)\">模型 yolov8.om（COCO 80 类，含 NMS），输入 640×640 取自 VPSS 扩展通道，不占用 4 个编码通道。框画在 720p 预览通道；4K 主码流(RTSP)暂不画框。</small>"
+"      <small style=\"color:var(--mut)\">输入 640×640 取自 VPSS 扩展通道（等比缩放 + 上下灰边），不占用 4 个编码通道。框画在 720p 预览通道；4K 主码流(RTSP)暂不画框。<br>"
+"      <b>COCO 模型</b>（yolov8/yolov7.om，片上 NMS）：类别白名单和上面两个滑块都有效。<br>"
+"      <b>人脸模型</b>（YuNet，裸输出、板上解码）：只出 face 一类（类别白名单自动忽略），并给出 5 个关键点，双眼画黄点；开「对焦区跟主体」后对焦窗会自动缩到双眼上＝眼控对焦。人脸模型置信度建议调到 70% 以上。</small>"
 "    </div>"
 "  </section>"
 "  <section class=\"tab\" id=\"img\">"
@@ -3372,11 +3375,22 @@ static const char g_web_html[] =
 "      <div class=\"btnrow\"><button class=\"btn g\" id=\"fvbtn\" onclick=\"fvToggle()\">开始对焦</button><button class=\"btn gray\" onclick=\"fvReset()\">清零峰值</button></div>"
 "      <small style=\"color:var(--mut)\">拧动镜头，把焦点值/峰值拧到最大即最清晰。取 ISP 画面中心区的高频对比度统计。</small>"
 "    </div>"
+"    <div class=\"card\"><h4>⛰️ 峰值对焦描边 / 过曝斑马纹</h4>"
+"      <div class=\"sw\"><input type=\"checkbox\" id=\"pk_en\"><label for=\"pk_en\">峰值对焦描边（合焦的边缘描高亮，哪块描得最满就是合焦）</label></div>"
+"      <div class=\"row\"><label>灵敏度</label><input type=range min=5 max=100 step=5 value=40 id=pk_th><span class=val id=pk_thv>40</span></div>"
+"      <div class=\"fld\"><label>描边颜色</label>"
+"        <select id=\"pk_color\"><option value=\"0\">红</option><option value=\"1\">黄</option><option value=\"2\">青</option><option value=\"3\">白</option></select></div>"
+"      <div class=\"sw\" style=\"margin-top:10px\"><input type=\"checkbox\" id=\"zb_en\"><label for=\"zb_en\">过曝斑马纹（亮度超门槛的地方打白色斜纹）</label></div>"
+"      <div class=\"row\"><label>过曝门槛</label><input type=range min=180 max=255 step=5 value=235 id=zb_th><span class=val id=zb_thv>235</span></div>"
+"      <div class=\"btnrow\"><button class=\"btn g\" onclick=\"savePeak()\">保存并生效</button></div>"
+"      <div class=\"msg\" id=\"pkmsg\"></div>"
+"      <small style=\"color:var(--mut)\">在 NPU 那一路 640×360 的取景帧上算，画到 720p 预览叠加层（和时间戳/检测框同一层）；4K 主码流不画。约 150ms 更新一次，计算耗时见 <code>/peak</code> 的 ms 字段。</small>"
+"    </div>"
 "    <div class=\"card\"><h4>🕒 OSD 时间水印</h4>"
 "      <div class=\"sw\"><input type=\"checkbox\" id=\"osd_en\"><label for=\"osd_en\">在画面左上角叠加时间戳</label></div>"
 "      <div class=\"sw\"><input type=\"checkbox\" id=\"osd_focus\"><label for=\"osd_focus\">叠加焦点值+对焦条（对焦时用，看着屏幕拧镜头）</label></div>"
 "      <div class=\"sw\"><input type=\"checkbox\" id=\"focus_spot\" checked><label for=\"focus_spot\">点对焦（只测画面中心，并画框）——取消则全画幅平均</label></div>"
-"      <div class=\"sw\"><input type=\"checkbox\" id=\"focus_follow\"><label for=\"focus_follow\">对焦区跟着 AI 检测的主体走（黄框＝正在测它）</label></div>"
+"      <div class=\"sw\"><input type=\"checkbox\" id=\"focus_follow\"><label for=\"focus_follow\">对焦区跟着 AI 检测的主体走（黄框＝正在测它；人脸模型会自动缩到双眼上，青框＝眼控对焦）</label></div>"
 "      <div class=\"btnrow\"><button class=\"btn g\" onclick=\"saveOsd()\">保存并生效</button></div>"
 "      <div class=\"msg\" id=\"osdmsg\"></div>"
 "      <small style=\"color:var(--mut)\">叠加到主码流(4K)与网页预览；时间取设备时钟(见「时间」页)。焦点条会随清晰度峰化。</small>"
@@ -3506,7 +3520,7 @@ static const char g_web_html[] =
 "  document.querySelectorAll('#nav button').forEach(function(x){x.classList.remove('on')});b.classList.add('on');"
 "  document.querySelectorAll('.tab').forEach(function(x){x.classList.remove('on')});$(b.dataset.t).classList.add('on');"
 "  if(b.dataset.t=='sys'){pollInfo();loadNet();}if(b.dataset.t=='time')pollTime();if(b.dataset.t=='rtsp')loadRtsp();if(b.dataset.t=='reg')pollReg();if(b.dataset.t=='gpio')pollGpio();if(b.dataset.t=='scr')loadScr();"
-"  if(b.dataset.t=='img'){$('v2').src='/stream?'+Date.now();loadOsd();loadExp();pollExp();}else{if($('v2'))$('v2').removeAttribute('src');fvStop();}"
+"  if(b.dataset.t=='img'){$('v2').src='/stream?'+Date.now();loadOsd();loadExp();pollExp();loadPeak();}else{if($('v2'))$('v2').removeAttribute('src');fvStop();}"
 "  if(b.dataset.t=='ai'){$('v3').src='/stream?'+Date.now();loadNpu();loadModels();pollNpu();}else{if($('v3'))$('v3').removeAttribute('src');}"
 "};});"
 "/* preview */"
@@ -3580,6 +3594,15 @@ static const char g_web_html[] =
 "  })['catch'](function(){})},300)}"
 "/* osd */"
 "function loadOsd(){fetch('/getosd').then(function(r){return r.json()}).then(function(j){$('osd_en').checked=!!j.en;if($('osd_focus'))$('osd_focus').checked=!!j.focus;if($('focus_spot'))$('focus_spot').checked=!!j.spot;if($('focus_follow'))$('focus_follow').checked=!!j.follow})['catch'](function(){})}"
+"/* 峰值描边 + 斑马纹 */"
+"function loadPeak(){fetch('/peak').then(function(r){return r.json()}).then(function(j){"
+"  $('pk_en').checked=!!j.peak;$('zb_en').checked=!!j.zebra;"
+"  $('pk_th').value=j.th;$('pk_thv').innerText=j.th;$('pk_color').value=j.color;"
+"  $('zb_th').value=j.zth;$('zb_thv').innerText=j.zth})['catch'](function(){})}"
+"$('pk_th').oninput=function(){$('pk_thv').innerText=$('pk_th').value};"
+"$('zb_th').oninput=function(){$('zb_thv').innerText=$('zb_th').value};"
+"function savePeak(){var u='/setpeak?peak='+($('pk_en').checked?1:0)+'&th='+$('pk_th').value+'&color='+$('pk_color').value+'&zebra='+($('zb_en').checked?1:0)+'&zth='+$('zb_th').value;"
+"  msg('pkmsg','正在应用…');fetch(u).then(function(r){return r.text()}).then(function(t){msg('pkmsg',t);loadPeak()})['catch'](function(){msg('pkmsg','失败')})}"
 "function saveOsd(){fetch('/setosd?en='+($('osd_en').checked?1:0)+'&focus='+($('osd_focus').checked?1:0)+'&spot='+($('focus_spot').checked?1:0)+'&follow='+($('focus_follow').checked?1:0)).then(function(r){return r.text()}).then(function(t){msg('osdmsg',t)})['catch'](function(){msg('osdmsg','失败')})}"
 "/* exposure + histogram */"
 "function shTxt(us){if(us==null||us<0)return'--';if(us>=1000000)return(us/1000000).toFixed(1)+'s';return'1/'+Math.round(1000000/us)}"
@@ -3621,8 +3644,11 @@ static const char g_web_html[] =
 "function pollNpu(){fetch('/npu').then(function(r){return r.json()}).then(function(j){"
 "  $('ai_n').innerText=j.n;$('ai_ms').innerText=(j.ms>0?j.ms+' ms':'--');"
 "  $('ai_rdy').innerText=j.ready?(j.en?'运行中':'已暂停'):(j.en?'启动中…':'关闭');"
-"  var h='',d=j.det||[];for(var i=0;i<d.length;i++){h+='<tr><td class=a>'+(i+1)+'</td><td>'+d[i].n+'</td>'"
-"    +'<td class=v>'+(d[i].s>=0?d[i].s+'%':'--')+'</td><td class=d>'+d[i].x+','+d[i].y+' · '+d[i].w+'×'+d[i].h+'</td></tr>'}"
+"  $('ai_kind').innerText=(j.kind=='face'?'人脸':'COCO');"
+"  var h='',d=j.det||[];for(var i=0;i<d.length;i++){var p=d[i].kp||[];"
+"    var ex=(p.length>=2)?(' · 眼 '+p[0][0]+','+p[0][1]+' / '+p[1][0]+','+p[1][1]):'';"
+"    h+='<tr><td class=a>'+(i+1)+'</td><td>'+d[i].n+'</td>'"
+"    +'<td class=v>'+(d[i].s>=0?d[i].s+'%':'--')+'</td><td class=d>'+d[i].x+','+d[i].y+' · '+d[i].w+'×'+d[i].h+ex+'</td></tr>'}"
 "  $('aibody').innerHTML=h||'<tr><td colspan=\"4\" class=\"d\">未检测到目标</td></tr>'})['catch'](function(){})}"
 "/* isp save + gpio */"
 "function imgSave(){fetch('/imgsave').then(function(r){return r.text()}).then(function(t){msg('imgmsg',t)})['catch'](function(){msg('imgmsg','保存失败')})}"
@@ -3714,6 +3740,14 @@ static char g_npu_model[64] = "yolov8.om";   /* 当前模型文件名, 在 /tmp/
 static int  g_npu_ready = 0;       /* 运行时: NPU 初始化成功 */
 static int  g_npu_last_num = 0;    /* 最近一帧检测框数 (供 web 读取) */
 static int  g_npu_ms = 0;          /* 最近一次推理耗时 ms */
+/* 峰值对焦描边 + 过曝斑马纹 —— 手动镜头的两个基本取景辅助, 都在扩展通道那帧上算,
+ * 画到 chn2 那张全幅叠加层上(和时间戳/检测框同一个 region, 单一写者=OSD 线程). */
+static int  g_peak_en = 0;         /* 峰值对焦: 合焦的边缘描高亮 */
+static int  g_peak_th = 40;        /* 灵敏度 0..100, 越大越只描最锐的边 */
+static int  g_peak_color = 0;      /* 0=红 1=黄 2=青 3=白 */
+static int  g_zebra_en = 0;        /* 过曝斑马纹 */
+static int  g_zebra_th = 235;      /* 亮度门槛 0..255, 超过就打斜纹 */
+static int  g_vis_ms = 0;          /* 最近一次描边/斑马纹计算耗时 ms (性能观察) */
 static pthread_mutex_t g_cfg_lock = PTHREAD_MUTEX_INITIALIZER;
 #define CAM_CFG_PATHS_N 3
 static const char *g_cfg_paths[CAM_CFG_PATHS_N] = { "/tmp/param/cam.conf", "/root/cam.conf", "/tmp/cam.conf" };
@@ -3748,12 +3782,14 @@ static void cam_cfg_save(void)
                "scr_en=%d\nscr_bright=%d\nscr_src=%d\nscr_lr=%d\nosd_en=%d\nosd_focus=%d\nfocus_spot=%d\n"
                "npu_en=%d\nnpu_interval=%d\nnpu_draw=%d\nnpu_score=%d\nnpu_cls=%s\nnpu_nms=%d\n"
                "npu_model=%s\nfocus_follow=%d\n"
-               "exp_manual=%d\nexp_us=%d\nexp_gain=%d\nexp_comp=%d\nexp_maxus=%d\n",
+               "exp_manual=%d\nexp_us=%d\nexp_gain=%d\nexp_comp=%d\nexp_maxus=%d\n"
+               "peak_en=%d\npeak_th=%d\npeak_color=%d\nzebra_en=%d\nzebra_th=%d\n",
         g_cam_user, g_cam_pass, g_rtsp_auth_en, g_net_ip, g_net_mask, g_net_gw,
         g_isp_luma, g_isp_contr, g_isp_satu, g_isp_hue,
         g_scr_en, g_scr_bright, g_scr_src, g_scr_lr, g_osd_en, g_osd_focus_en, g_focus_spot,
         g_npu_en, g_npu_interval, g_npu_draw, g_npu_score, g_npu_cls, g_npu_nms, g_npu_model,
-        g_focus_follow, g_exp_manual, g_exp_us, g_exp_gain, g_exp_comp, g_exp_maxus);
+        g_focus_follow, g_exp_manual, g_exp_us, g_exp_gain, g_exp_comp, g_exp_maxus,
+        g_peak_en, g_peak_th, g_peak_color, g_zebra_en, g_zebra_th);
     pthread_mutex_unlock(&g_cfg_lock);
     fclose(f);
 }
@@ -3791,11 +3827,20 @@ static void cam_cfg_load(void)
         else if (!strncmp(line, "npu_nms=", 8)) { g_npu_nms = atoi(line + 8); if (g_npu_nms < 5) { g_npu_nms = 5; } if (g_npu_nms > 95) { g_npu_nms = 95; } }
         else if (!strncmp(line, "npu_model=", 10)) { if (line[10] != '\0') { snprintf(g_npu_model, sizeof(g_npu_model), "%s", line + 10); } }
         else if (!strncmp(line, "focus_follow=", 13)) { g_focus_follow = atoi(line + 13) ? 1 : 0; }
-        else if (!strncmp(line, "exp_manual=", 11)) { g_exp_manual = atoi(line + 11) ? 1 : 0; }
+        /* 曝光挡是 0/1/2 三挡, 不能按布尔存 —— 以前写成 ?1:0, 重启后 M 挡会退回 S 挡 */
+        else if (!strncmp(line, "exp_manual=", 11)) {
+            g_exp_manual = atoi(line + 11);
+            if (g_exp_manual < 0 || g_exp_manual > 2) { g_exp_manual = 0; }
+        }
         else if (!strncmp(line, "exp_us=", 7)) { g_exp_us = atoi(line + 7); }
         else if (!strncmp(line, "exp_gain=", 9)) { g_exp_gain = atoi(line + 9); }
         else if (!strncmp(line, "exp_comp=", 9)) { g_exp_comp = atoi(line + 9); }
         else if (!strncmp(line, "exp_maxus=", 10)) { g_exp_maxus = atoi(line + 10); }
+        else if (!strncmp(line, "peak_en=", 8)) { g_peak_en = atoi(line + 8) ? 1 : 0; }
+        else if (!strncmp(line, "peak_th=", 8)) { g_peak_th = atoi(line + 8); if (g_peak_th < 1) { g_peak_th = 1; } if (g_peak_th > 100) { g_peak_th = 100; } }
+        else if (!strncmp(line, "peak_color=", 11)) { g_peak_color = atoi(line + 11) & 3; }
+        else if (!strncmp(line, "zebra_en=", 9)) { g_zebra_en = atoi(line + 9) ? 1 : 0; }
+        else if (!strncmp(line, "zebra_th=", 9)) { g_zebra_th = atoi(line + 9); if (g_zebra_th < 100) { g_zebra_th = 100; } if (g_zebra_th > 255) { g_zebra_th = 255; } }
     }
     pthread_mutex_unlock(&g_cfg_lock);
     fclose(f);
@@ -4254,7 +4299,8 @@ static void *cam_osd_thread(void *arg)
     while (1) {
         cam_osd_update();
         /* 对焦时看峰值、开检测时框要跟手 -> 5Hz; 平时 1Hz 够刷秒 */
-        if (g_osd_focus_en || (g_npu_en && g_npu_draw && g_npu_ready)) { usleep(200000); }
+        if (g_osd_focus_en || g_peak_en || g_zebra_en ||
+            (g_npu_en && g_npu_draw && g_npu_ready)) { usleep(200000); }
         else { sleep(1); }
     }
     return TD_NULL;
@@ -4282,13 +4328,23 @@ static void cam_url_decode(const char *src, int slen, char *dst, int cap)
 }
 
 /* extract url query param 'key' from request line into out (url-decoded) */
+/* 取查询参数。注意必须校验匹配点前面是 '?' 或 '&' —— 裸 strstr("th=") 会一头撞进
+ * "zth=150" 里把斑马纹门槛当成描边灵敏度; 同理 "us=" 会命中 "maxus="。
+ * 这类参数名互为后缀的组合本固件里就有两对(th/zth, us/maxus), 网页只是靠"短的排前面"
+ * 侥幸躲过, 直接调接口就会中招。 */
 static int cam_qparam(const char *req, const char *key, char *out, int cap)
 {
-    char pat[40]; const char *p, *e;
+    char pat[40]; const char *p, *e; size_t plen;
     snprintf(pat, sizeof(pat), "%s=", key);
-    p = strstr(req, pat);
-    if (p == TD_NULL) { out[0] = '\0'; return 0; }
-    p += strlen(pat);
+    plen = strlen(pat);
+    p = req;
+    for (;;) {
+        p = strstr(p, pat);
+        if (p == TD_NULL) { out[0] = '\0'; return 0; }
+        if (p != req && (p[-1] == '?' || p[-1] == '&')) { break; }  /* 是完整参数名 */
+        p += plen;                                                 /* 半路命中, 继续找 */
+    }
+    p += plen;
     e = p;
     while (*e && *e != '&' && *e != ' ' && *e != '\r' && *e != '\n') { e++; }
     cam_url_decode(p, (int)(e - p), out, cap);
@@ -5006,10 +5062,13 @@ static void web_close(int fd)
     close(fd);
 }
 
-/* NPU 检测的接口定义在文件末尾的 NPU 模块里 (那边才有 g_npu_box), 这里先声明 */
+/* NPU 检测的接口定义在文件末尾的 NPU 模块里 (那边才有 g_npu_box), 这里先声明.
+ * 取景辅助(描边/斑马纹)同理 —— 它要用那边的扩展通道生命周期函数 */
 static void cam_http_npu(int fd);
 static void cam_http_setnpu(int fd, const char *req);
 static void cam_http_models(int fd);
+static void cam_http_peak(int fd);
+static void cam_http_setpeak(int fd, const char *req);
 
 static void *web_client_thread(void *arg)
 {
@@ -5040,6 +5099,7 @@ static void *web_client_thread(void *arg)
                    strstr(req, "GET /focus") != TD_NULL || strstr(req, "GET /getosd") != TD_NULL ||
                    strstr(req, "GET /setosd") != TD_NULL ||
                    strstr(req, "GET /npu") != TD_NULL || strstr(req, "GET /setnpu") != TD_NULL ||
+                   strstr(req, "GET /peak") != TD_NULL || strstr(req, "GET /setpeak") != TD_NULL ||
                    strstr(req, "GET /models") != TD_NULL || strstr(req, "GET /hist") != TD_NULL ||
                    strstr(req, "GET /exp") != TD_NULL || strstr(req, "GET /setexp") != TD_NULL ||
                    strstr(req, "GET /exec") != TD_NULL) {
@@ -5095,6 +5155,10 @@ static void *web_client_thread(void *arg)
                 cam_http_exp(fd);
             } else if (strstr(req, "GET /hist") != TD_NULL) {
                 cam_http_hist(fd);
+            } else if (strstr(req, "GET /setpeak") != TD_NULL) {  /* 必须排在 /peak 和 /set 前 */
+                cam_http_setpeak(fd, req);
+            } else if (strstr(req, "GET /peak") != TD_NULL) {
+                cam_http_peak(fd);
             } else if (strstr(req, "GET /setnpu") != TD_NULL) {   /* 必须排在 /npu 和 /set 前 */
                 cam_http_setnpu(fd, req);
             } else if (strstr(req, "GET /npu") != TD_NULL) {
@@ -5621,6 +5685,7 @@ static void *rtsp_listen_thread(void *arg)
 #include <sys/prctl.h>
 #include <dirent.h>
 #include <sys/stat.h>
+#include <math.h>            /* YuNet 解码要 expf/sqrtf (musl 的 libm 在 libc 里, 不用加 -lm) */
 #include "ss_mpi_vpss.h"
 #include "ss_mpi_vb.h"
 #include "ss_mpi_sys_mem.h"
@@ -5668,11 +5733,19 @@ static const char *cam_npu_model_path(void)
 
 /* ---------- Phase2: 检测结果存储 + 画到画面 (region overlay) ---------- */
 #define NPU_MAX_DET 16
+#define NPU_KPS 5             /* 关键点上限 (YuNet 给 5 个: 右眼/左眼/鼻尖/右嘴角/左嘴角) */
 typedef struct {
     int x0, y0, x1, y1;   /* 千分比坐标 (0..1000), 与分辨率无关, 任意通道/网页都能换算 */
-    int cls;              /* COCO 类别号, -1=未知 */
+    int cls;              /* COCO 类别号, -1=未知(人脸模型也用 -1) */
     int score;            /* 置信度 0..100, -1=模型没给 */
+    int nkp;              /* 关键点个数, 0=该模型不给 */
+    int kx[NPU_KPS], ky[NPU_KPS];   /* 关键点, 同样是千分比 */
 } cam_npu_box;
+/* 模型类别: 厂商 .om 自带 RPN 检测输出层(X/X_ 一对, NMS 在片上做);
+ * YuNet 这类自己转的裸输出模型要在 A55 上解码 + 自己做 NMS. */
+#define NPU_KIND_RPN    0
+#define NPU_KIND_YUNET  1
+static int g_npu_kind = NPU_KIND_RPN;
 static cam_npu_box g_npu_box[NPU_MAX_DET];
 static int g_npu_box_n = 0;
 static int g_npu_layout_logged = 0;
@@ -5698,6 +5771,12 @@ static const char *cam_coco_name(int cls)
 {
     if (cls >= 0 && cls < (int)(sizeof(g_coco) / sizeof(g_coco[0]))) { return g_coco[cls]; }
     return "object";
+}
+/* 目标名: 人脸模型没有 COCO 类别, 统一叫 face */
+static const char *cam_det_name(int cls)
+{
+    if (g_npu_kind == NPU_KIND_YUNET) { return "face"; }
+    return cam_coco_name(cls);
 }
 /* 每类一个颜色 (ARGB1555, 最高位=不透明) */
 static const unsigned short g_det_color[8] = {
@@ -5815,6 +5894,20 @@ static const unsigned char g_txt_font[95][16] = {
 #define DET_TXT_SCALE 2                    /* 8x16 字体放大 2 倍 = 16x32, 720p 上够看 */
 static int g_det_rgn_ready = 0;
 
+/* 峰值对焦描边 / 过曝斑马纹的掩膜.
+ * 在 VPSS 扩展通道那帧(640x360 的 Y 平面)上算, 1 bit/像素打包 —— 一张掩膜才 28.8KB,
+ * 画到 1280x720 叠加层时正好 1 个 bit 铺 2x2 像素。
+ * 写者 = 视觉线程(cam_vis_analyze), 读者 = OSD 线程(cam_vis_blit), 用 g_vis_lock 隔开;
+ * 算的时候先写线程私有的暂存区, 只有整块 memcpy 那一下才持锁, 免得 OSD 等太久。 */
+#define VIS_MASK_W      640
+#define VIS_MASK_H      360
+#define VIS_MASK_STRIDE (VIS_MASK_W / 8)
+#define VIS_MASK_BYTES  (VIS_MASK_STRIDE * VIS_MASK_H)
+static unsigned char g_peak_mask[VIS_MASK_BYTES];
+static unsigned char g_zebra_mask[VIS_MASK_BYTES];
+static int g_vis_mw = 0, g_vis_mh = 0;     /* 掩膜里实际有效的宽高(0=还没算过) */
+static pthread_mutex_t g_vis_lock = PTHREAD_MUTEX_INITIALIZER;
+
 static void cam_det_px(unsigned char *base, int stride, int cw, int ch, int x, int y, unsigned short c)
 {
     if (x < 0 || y < 0 || x >= cw || y >= ch) { return; }   /* 越界丢弃, 框贴边也安全 */
@@ -5896,15 +5989,56 @@ static void cam_chn2_rgn_init(void)
     printf("[osd] chn2 overlay up (%dx%d: 时间戳+对焦+检测框)\n", DET_W, DET_H);
 }
 
-/* 对焦测量区: 跟主体(检测框最大的那个) > 中心块 > 全画幅. 返回 1 = 正跟着主体 */
+/* 把峰值/斑马纹掩膜铺到叠加层. 一个 bit -> sx*sy 个像素 (640x360 -> 1280x720 即 2x2).
+ * 两者重叠时描边优先(描边是判断合焦的, 别被斑马纹盖住). */
+static void cam_vis_blit(unsigned char *base, int stride)
+{
+    /* 描边颜色 ARGB1555: 红/黄/青/白 */
+    static const unsigned short peak_col[4] = { 0xFC00, 0xFFE0, 0x83FF, 0xFFFF };
+    unsigned short pc;
+    int mw, mh, sx, sy, r, c, dx, dy;
+    int peak = g_peak_en, zeb = g_zebra_en;
+    if (!peak && !zeb) { return; }
+    pc = peak_col[g_peak_color & 3];
+    pthread_mutex_lock(&g_vis_lock);
+    mw = g_vis_mw; mh = g_vis_mh;
+    if (mw > 0 && mh > 0) {
+        sx = DET_W / mw; sy = DET_H / mh;
+        if (sx < 1) { sx = 1; }
+        if (sy < 1) { sy = 1; }
+        for (r = 0; r < mh; r++) {
+            const unsigned char *pr = g_peak_mask + (size_t)r * VIS_MASK_STRIDE;
+            const unsigned char *zr = g_zebra_mask + (size_t)r * VIS_MASK_STRIDE;
+            for (c = 0; c < mw; c++) {
+                unsigned char bit = (unsigned char)(0x80 >> (c & 7));
+                int on_p = peak && (pr[c >> 3] & bit);
+                int on_z = zeb && (zr[c >> 3] & bit);
+                unsigned short col;
+                int px, py;
+                if (!on_p && !on_z) { continue; }
+                col = on_p ? pc : 0xFFFF;          /* 斑马纹白色斜纹 */
+                px = c * sx; py = r * sy;
+                for (dy = 0; dy < sy; dy++) {
+                    unsigned short *row = (unsigned short *)(base + (size_t)(py + dy) * stride);
+                    for (dx = 0; dx < sx; dx++) { row[px + dx] = col; }
+                }
+            }
+        }
+    }
+    pthread_mutex_unlock(&g_vis_lock);
+}
+
+/* 对焦测量区: 跟主体(检测框最大的那个) > 中心块 > 全画幅.
+ * 返回 0=中心/全幅, 1=跟主体框, 2=跟眼睛(人脸模型给了关键点时自动升级为眼控对焦) */
 static int cam_focus_zone(int *pr0, int *pr1, int *pc0, int *pc1)
 {
     int r0 = FOCUS_SPOT_R0, r1 = FOCUS_SPOT_R1, c0 = FOCUS_SPOT_C0, c1 = FOCUS_SPOT_C1;
     int follow = 0;
     if (g_focus_follow) {
-        cam_npu_box b;
+        cam_npu_box b = {0};
         int i, best = -1;
         long long area = 0;
+        int bx0, by0, bx1, by1;
         pthread_mutex_lock(&g_npu_lock);
         for (i = 0; i < g_npu_box_n && i < NPU_MAX_DET; i++) {   /* 主体 = 面积最大的框 */
             long long a = (long long)(g_npu_box[i].x1 - g_npu_box[i].x0) *
@@ -5913,16 +6047,38 @@ static int cam_focus_zone(int *pr0, int *pr1, int *pc0, int *pc1)
         }
         if (best >= 0) { b = g_npu_box[best]; }
         pthread_mutex_unlock(&g_npu_lock);
-        if (best >= 0 && area > 0) {   /* 千分比 -> AF 统计网格 (15 行 x 17 列) */
-            c0 = b.x0 * OT_ISP_AF_ZONE_COLUMN / 1000;
-            c1 = b.x1 * OT_ISP_AF_ZONE_COLUMN / 1000;
-            r0 = b.y0 * OT_ISP_AF_ZONE_ROW / 1000;
-            r1 = b.y1 * OT_ISP_AF_ZONE_ROW / 1000;
+        if (best >= 0 && area > 0) {
+            bx0 = b.x0; by0 = b.y0; bx1 = b.x1; by1 = b.y1;
+            follow = 1;
+            /* 眼控对焦: 有两只眼睛的关键点就只测眼睛那一小块 —— 人像该合焦的是眼睛,
+             * 用整张脸去测, 焦点会被鼻尖/头发拉走. 窗口 = 双眼间距, 且不小于脸宽的 1/3
+             * (AF 统计只有 17x15 格, 太小的窗口取不到格子). */
+            if (b.nkp >= 2) {
+                int ex = (b.kx[0] + b.kx[1]) / 2, ey = (b.ky[0] + b.ky[1]) / 2;
+                int dx = (b.kx[0] > b.kx[1]) ? (b.kx[0] - b.kx[1]) : (b.kx[1] - b.kx[0]);
+                int hw = dx, hh = dx / 2;
+                int minw = (bx1 - bx0) / 3, minh = (by1 - by0) / 4;
+                if (hw < minw) { hw = minw; }
+                if (hh < minh) { hh = minh; }
+                if (hw < 30) { hw = 30; }        /* 至少 3% 画幅 */
+                if (hh < 30) { hh = 30; }
+                bx0 = ex - hw; bx1 = ex + hw;
+                by0 = ey - hh; by1 = ey + hh;
+                if (bx0 < 0) { bx0 = 0; }
+                if (by0 < 0) { by0 = 0; }
+                if (bx1 > 1000) { bx1 = 1000; }
+                if (by1 > 1000) { by1 = 1000; }
+                follow = 2;
+            }
+            /* 千分比 -> AF 统计网格 (15 行 x 17 列) */
+            c0 = bx0 * OT_ISP_AF_ZONE_COLUMN / 1000;
+            c1 = bx1 * OT_ISP_AF_ZONE_COLUMN / 1000;
+            r0 = by0 * OT_ISP_AF_ZONE_ROW / 1000;
+            r1 = by1 * OT_ISP_AF_ZONE_ROW / 1000;
             if (c1 >= OT_ISP_AF_ZONE_COLUMN) { c1 = OT_ISP_AF_ZONE_COLUMN - 1; }
             if (r1 >= OT_ISP_AF_ZONE_ROW) { r1 = OT_ISP_AF_ZONE_ROW - 1; }
             if (c1 < c0) { c1 = c0; }
             if (r1 < r0) { r1 = r0; }
-            follow = 1;
         }
     }
     if (!follow && !g_focus_spot) {
@@ -5951,6 +6107,8 @@ static void cam_chn2_draw(void)
     stride = (int)ci.stride;
     (td_void)memset_s(base, (size_t)stride * ci.size.height, 0, (size_t)stride * ci.size.height);
 
+    cam_vis_blit(base, stride);      /* 先铺描边/斑马纹, 文字和框画在它上面 */
+
     if (g_osd_en) {                                   /* 时间戳(和主码流那层同样式) */
         time_t t = time(TD_NULL);
         struct tm lt;
@@ -5974,7 +6132,8 @@ static void cam_chn2_draw(void)
             int fol = cam_focus_zone(&fr0, &fr1, &fc0, &fc1);
             int x0 = fc0 * DET_W / OT_ISP_AF_ZONE_COLUMN, x1 = (fc1 + 1) * DET_W / OT_ISP_AF_ZONE_COLUMN;
             int y0 = fr0 * DET_H / OT_ISP_AF_ZONE_ROW,    y1 = (fr1 + 1) * DET_H / OT_ISP_AF_ZONE_ROW;
-            unsigned short fc = fol ? 0xFFE0 : 0xFFFF;   /* 跟主体时画黄框, 中心块画白框 */
+            /* 白=中心块, 黄=跟主体框, 青=眼控(测的是眼睛那一小块) */
+            unsigned short fc = (fol == 2) ? 0x83FF : (fol ? 0xFFE0 : 0xFFFF);
             cam_det_rect(base, stride, DET_W, DET_H, x0, y0, x1, y1, 2, fc);
             cam_det_rect(base, stride, DET_W, DET_H, x0 - 2, y0 - 2, x1 + 2, y1 + 2, 1, 0x8000);
         }
@@ -5984,18 +6143,26 @@ static void cam_chn2_draw(void)
         int tymin = g_osd_en ? (DET_OY + OSD_LH + 4) : 0;
         if (g_osd_focus_en) { tymin = DET_OY + OSD_BAR_Y + OSD_BAR_H + 4; }
         for (i = 0; i < n && i < NPU_MAX_DET; i++) {
-            unsigned short c = g_det_color[(b[i].cls < 0 ? 0 : b[i].cls) & 7];
+            unsigned short c = (g_npu_kind == NPU_KIND_YUNET) ? 0x83FF     /* 人脸统一青色 */
+                             : g_det_color[(b[i].cls < 0 ? 0 : b[i].cls) & 7];
             int x0 = b[i].x0 * DET_W / 1000, x1 = b[i].x1 * DET_W / 1000;
             int y0 = b[i].y0 * DET_H / 1000, y1 = b[i].y1 * DET_H / 1000;
             int ty = y0 - 16 * DET_TXT_SCALE - 4;
             char lab[40];
+            int k;
             if (x1 <= x0 || y1 <= y0) { continue; }
             cam_det_rect(base, stride, DET_W, DET_H, x0, y0, x1, y1, 2, c);
             cam_det_rect(base, stride, DET_W, DET_H, x0 - 2, y0 - 2, x1 + 2, y1 + 2, 1, 0x8000);
+            for (k = 0; k < b[i].nkp && k < NPU_KPS; k++) {   /* 关键点: 眼睛画大点, 其它小点 */
+                int px = b[i].kx[k] * DET_W / 1000, py = b[i].ky[k] * DET_H / 1000;
+                int rr = (k < 2) ? 3 : 1;
+                unsigned short kc = (k < 2) ? 0xFFE0 : 0xFFFF;   /* 双眼=黄 */
+                cam_det_rect(base, stride, DET_W, DET_H, px - rr, py - rr, px + rr, py + rr, 2, kc);
+            }
             if (b[i].score >= 0) {
-                (td_void)snprintf(lab, sizeof(lab), "%s %d%%", cam_coco_name(b[i].cls), b[i].score);
+                (td_void)snprintf(lab, sizeof(lab), "%s %d%%", cam_det_name(b[i].cls), b[i].score);
             } else {
-                (td_void)snprintf(lab, sizeof(lab), "%s", cam_coco_name(b[i].cls));
+                (td_void)snprintf(lab, sizeof(lab), "%s", cam_det_name(b[i].cls));
             }
             /* 贴顶时标签画到框内; 再往下让开时间戳那条(否则叠在一起看不清) */
             if (ty < tymin) { ty = y0 + 2; }
@@ -6012,7 +6179,13 @@ static void cam_chn2_draw(void)
  * yolov3/4: detection_nms_2 …), 所以按"配对"找即可, 不用写死型号表. */
 static char g_npu_num_name[64] = "output0";
 static char g_npu_roi_name[64] = "output0_";
-static char g_npu_rpn_name[] = "rpn_data";    /* 阈值输入张量名 */
+static char g_npu_rpn_name[] = "rpn_data";    /* 阈值输入张量名 (只有 RPN 检测层的模型才有) */
+/* YuNet(自转的裸输出人脸模型): 三个尺度各 4 个输出 cls_N/obj_N/bbox_N/kps_N.
+ * 解码 + NMS 全在 A55 上做, 见 cam_npu_parse_yunet. */
+#define YUNET_SCALES 3
+static const int g_yunet_stride[YUNET_SCALES] = { 8, 16, 32 };
+typedef struct { size_t cls, obj, bbox, kps; int ok; } cam_yunet_out;
+static cam_yunet_out g_yunet[YUNET_SCALES];
 static volatile int g_npu_stop = 0;
 static pthread_t g_npu_th;                    /* 推理线程, 换模型时要 join */
 static int g_npu_th_run = 0;
@@ -6032,10 +6205,39 @@ static int g_npu_lb_y = 0;                /* 内容区在模型输入里的 y �
 
 /* 载入模型后自动认出 ROI 输出张量名: 输出里成对出现 X / X_ (X_=坐标, X=计数).
  * 认不出就沿用默认(yolov8 的 output0/output0_)并打日志. */
+/* YuNet 识别: 输出里出现 cls_8/obj_8/bbox_8/kps_8 这套名字就按裸输出人脸模型解码.
+ * 三个尺度只要有一个齐全就算数(缺的那尺度跳过), 返回 1 = 是 YuNet. */
+static int cam_npu_try_yunet(const char **names, size_t n)
+{
+    char nm[16];
+    int s, got = 0;
+    size_t i;
+    (td_void)memset_s(g_yunet, sizeof(g_yunet), 0, sizeof(g_yunet));
+    for (s = 0; s < YUNET_SCALES; s++) {
+        int have = 0;
+        for (i = 0; i < n; i++) {
+            if (names[i] == TD_NULL) { continue; }
+            (td_void)snprintf(nm, sizeof(nm), "cls_%d", g_yunet_stride[s]);
+            if (!strcmp(names[i], nm)) { g_yunet[s].cls = i; have |= 1; }
+            (td_void)snprintf(nm, sizeof(nm), "obj_%d", g_yunet_stride[s]);
+            if (!strcmp(names[i], nm)) { g_yunet[s].obj = i; have |= 2; }
+            (td_void)snprintf(nm, sizeof(nm), "bbox_%d", g_yunet_stride[s]);
+            if (!strcmp(names[i], nm)) { g_yunet[s].bbox = i; have |= 4; }
+            (td_void)snprintf(nm, sizeof(nm), "kps_%d", g_yunet_stride[s]);
+            if (!strcmp(names[i], nm)) { g_yunet[s].kps = i; have |= 8; }
+        }
+        if ((have & 7) == 7) {                 /* cls+obj+bbox 必须齐, kps 可缺 */
+            g_yunet[s].ok = (have & 8) ? 2 : 1;   /* 2 = 带关键点(能眼控对焦) */
+            got++;
+        }
+    }
+    return (got > 0);
+}
+
 static void cam_npu_detect_names(void)
 {
     sample_svp_npu_model_info *mi = sample_common_svp_npu_get_model_info(0);
-    const char *names[8];
+    const char *names[16];
     size_t n, i, k;
     if (mi == TD_NULL || mi->model_desc == TD_NULL) { return; }
     n = svp_acl_mdl_get_num_outputs(mi->model_desc);
@@ -6044,6 +6246,13 @@ static void cam_npu_detect_names(void)
         names[i] = svp_acl_mdl_get_output_name_by_index(mi->model_desc, i);
         printf("[npu] 输出%zu: %s\n", i, (names[i] != TD_NULL) ? names[i] : "(null)");
     }
+    if (cam_npu_try_yunet(names, n)) {
+        g_npu_kind = NPU_KIND_YUNET;
+        printf("[npu] 识别为 YuNet 人脸模型 (裸输出, 板上解码+NMS): 尺度 8=%d 16=%d 32=%d "
+               "(2=带5关键点)\n", g_yunet[0].ok, g_yunet[1].ok, g_yunet[2].ok);
+        return;
+    }
+    g_npu_kind = NPU_KIND_RPN;
     for (i = 0; i < n; i++) {
         size_t li;
         if (names[i] == TD_NULL) { continue; }
@@ -6059,6 +6268,51 @@ static void cam_npu_detect_names(void)
         }
     }
     printf("[npu] 未识别出配对张量名, 沿用 %s/%s\n", g_npu_num_name, g_npu_roi_name);
+}
+
+/* ---- VPSS 扩展通道 (chn4) 的生命周期 ----
+ * 这一路帧现在有三个消费者: NPU 检测、峰值对焦描边、过曝斑马纹。所以通道不再归 NPU 独有,
+ * 谁先要谁开, 全都不要了才关。绑 phys chn0(4K主), TAIL, 等比缩到 w x h, YUV420SP, depth=1.
+ * (不是缩到 640x640 —— 那样会压扁; 补边在 cam_npu_letterbox 里做) */
+static int g_vis_chn_w = 0, g_vis_chn_h = 0;    /* 当前扩展通道输出尺寸, 0 = 没开 */
+
+static int cam_vis_chn_start(int w, int h)
+{
+    ot_vpss_ext_chn_attr ext;
+    td_s32 ret;
+    if (w <= 0 || h <= 0) { return -1; }
+    if (g_vis_chn_w == w && g_vis_chn_h == h) { return 0; }      /* 已经是这个尺寸, 幂等 */
+    if (g_vis_chn_w != 0) {                                      /* 尺寸变了(换了输入不同的模型): 拆了重建 */
+        printf("[vis] 扩展通道 %dx%d -> %dx%d, 重建\n", g_vis_chn_w, g_vis_chn_h, w, h);
+        (td_void)ss_mpi_vpss_disable_chn(0, NPU_EXT_CHN);
+        g_vis_chn_w = 0; g_vis_chn_h = 0;
+    }
+    (td_void)memset_s(&ext, sizeof(ext), 0, sizeof(ext));
+    ext.bind_chn      = 0;
+    ext.src_type      = OT_EXT_CHN_SRC_TYPE_TAIL;
+    ext.width         = (td_u32)w;
+    ext.height        = (td_u32)h;
+    ext.depth         = 1;
+    ext.video_format  = OT_VIDEO_FORMAT_LINEAR;
+    ext.dynamic_range = OT_DYNAMIC_RANGE_SDR8;
+    ext.pixel_format  = OT_PIXEL_FORMAT_YVU_SEMIPLANAR_420;
+    ext.compress_mode = OT_COMPRESS_MODE_NONE;
+    ext.frame_rate.src_frame_rate = -1;
+    ext.frame_rate.dst_frame_rate = -1;
+    ret = ss_mpi_vpss_set_ext_chn_attr(0, NPU_EXT_CHN, &ext);
+    if (ret != TD_SUCCESS) { printf("[vis] set_ext_chn_attr failed %#x\n", ret); return -1; }
+    ret = ss_mpi_vpss_enable_chn(0, NPU_EXT_CHN);
+    if (ret != TD_SUCCESS) { printf("[vis] enable ext chn failed %#x\n", ret); return -1; }
+    g_vis_chn_w = w; g_vis_chn_h = h;
+    return 0;
+}
+
+static void cam_vis_chn_stop(void)
+{
+    if (g_vis_chn_w != 0) {
+        (td_void)ss_mpi_vpss_disable_chn(0, NPU_EXT_CHN);
+        g_vis_chn_w = 0; g_vis_chn_h = 0;
+    }
 }
 
 /* 初始化: acl init -> 载模型 -> 取输入分辨率 -> 建 dataset/task/work buf -> 设阈值.
@@ -6119,6 +6373,14 @@ static int cam_npu_init(void)
     printf("[npu] letterbox: 内容 %dx%d 居中于 %ux%u (y偏移 %d), 输入缓冲 %u 字节 stride %u\n",
         g_npu_cw, g_npu_ch, g_npu_insize.width, g_npu_insize.height, g_npu_lb_y,
         g_npu_in_size, g_npu_in_stride);
+    /* 我们是按 YUV420SP 直接零拷贝喂的, 所以输入缓冲必须是 stride*h*3/2.
+     * 转模型时忘了加 AIPP 的话输入会是 float32 RGB (stride 变 4 倍, size = stride*h*3),
+     * 喂进去不会崩但结果全是垃圾 —— 这里明确报出来, 免得又花一晚上查"为什么检不出". */
+    if (g_npu_in_size != (td_u32)((size_t)g_npu_in_stride * g_npu_insize.height * 3 / 2)) {
+        printf("[npu] ⚠ 输入缓冲 %u 字节 ≠ YUV420SP 应有的 %u —— 这个 .om 多半没带 AIPP"
+               "(输入是 float32/RGB), 检测结果不可信, 请用 --insert_op_conf 重转\n",
+            g_npu_in_size, (td_u32)((size_t)g_npu_in_stride * g_npu_insize.height * 3 / 2));
+    }
     ret = sample_common_svp_npu_create_output(&g_npu_task);
     if (ret != TD_SUCCESS) { printf("[npu] create output failed %#x\n", ret); goto err_in; }
     ret = sample_common_svp_npu_create_task_buf(&g_npu_task);
@@ -6128,12 +6390,21 @@ static int cam_npu_init(void)
 
     /* 阈值张量 "rpn_data": nms 用 g_npu_nms(可 web 调, 默认 0.45);
      * score 留 0.10 让模型多吐候选, 置信度门槛在我们自己解析时按 g_npu_score 卡 —— 这样
-     * 调门槛不用重新初始化模型. */
-    (td_void)memset_s(&th, sizeof(th), 0, sizeof(th));
-    th.nms_threshold = (float)g_npu_nms / 100.0f; th.score_threshold = 0.10f;
-    th.min_height = 1.0f; th.min_width = 1.0f; th.name = g_npu_rpn_name;
-    ret = sample_common_svp_npu_set_threshold(&th, 1, &g_npu_task);
-    if (ret != TD_SUCCESS) { printf("[npu] set threshold failed %#x\n", ret); goto err_workbuf; }
+     * 调门槛不用重新初始化模型.
+     * 只有带 RPN 检测输出层的模型(厂商那批 yolo .om)才有这个输入张量; YuNet 这种裸输出
+     * 模型没有, 设失败很正常 —— 必须非致命, 否则会把能用的模型当坏模型踢掉. */
+    if (g_npu_kind == NPU_KIND_RPN) {
+        (td_void)memset_s(&th, sizeof(th), 0, sizeof(th));
+        th.nms_threshold = (float)g_npu_nms / 100.0f; th.score_threshold = 0.10f;
+        th.min_height = 1.0f; th.min_width = 1.0f; th.name = g_npu_rpn_name;
+        ret = sample_common_svp_npu_set_threshold(&th, 1, &g_npu_task);
+        if (ret != TD_SUCCESS) {
+            printf("[npu] set threshold failed %#x (没有 %s 输入张量? 忽略, 用解析端门槛)\n",
+                ret, g_npu_rpn_name);
+        }
+    } else {
+        printf("[npu] 裸输出模型: NMS 在 A55 上做 (交并比 %d%%)\n", g_npu_nms);
+    }
 
     g_npu_det.num_name = g_npu_num_name;
     g_npu_det.roi_name = g_npu_roi_name;
@@ -6141,7 +6412,6 @@ static int cam_npu_init(void)
     g_npu_det.roi_offset = 0;
     return 0;
 
-err_workbuf: (td_void)sample_common_svp_npu_destroy_work_buf(&g_npu_task);
 err_taskbuf: (td_void)sample_common_svp_npu_destroy_task_buf(&g_npu_task);
 err_out:     (td_void)sample_common_svp_npu_destroy_output(&g_npu_task);
 err_in:      (td_void)sample_common_svp_npu_destroy_input(&g_npu_task);
@@ -6158,7 +6428,8 @@ static void cam_npu_teardown(void)
         g_npu_th_run = 0;
     }
     g_npu_ready = 0;
-    (td_void)ss_mpi_vpss_disable_chn(0, NPU_EXT_CHN);
+    /* 通道不是 NPU 独有的了: 描边/斑马纹还要帧就留着(换模型时它俩只会断一下下) */
+    if (!g_peak_en && !g_zebra_en) { cam_vis_chn_stop(); }
     (td_void)sample_common_svp_npu_destroy_work_buf(&g_npu_task);
     (td_void)sample_common_svp_npu_destroy_task_buf(&g_npu_task);
     (td_void)sample_common_svp_npu_destroy_output(&g_npu_task);
@@ -6170,31 +6441,6 @@ static void cam_npu_teardown(void)
     pthread_mutex_lock(&g_npu_lock);
     g_npu_box_n = 0; g_npu_last_num = 0;
     pthread_mutex_unlock(&g_npu_lock);
-}
-
-/* 建 VPSS 扩展通道 chn4: 绑 phys chn0(4K主), TAIL, 等比缩到 640x360, YUV420SP, depth=1.
- * (不是缩到 640x640 —— 那样会压扁; 补边在 cam_npu_letterbox 里做) */
-static int cam_npu_ext_chn_start(void)
-{
-    ot_vpss_ext_chn_attr ext;
-    td_s32 ret;
-    (td_void)memset_s(&ext, sizeof(ext), 0, sizeof(ext));
-    ext.bind_chn      = 0;
-    ext.src_type      = OT_EXT_CHN_SRC_TYPE_TAIL;
-    ext.width         = (td_u32)g_npu_cw;
-    ext.height        = (td_u32)g_npu_ch;
-    ext.depth         = 1;
-    ext.video_format  = OT_VIDEO_FORMAT_LINEAR;
-    ext.dynamic_range = OT_DYNAMIC_RANGE_SDR8;
-    ext.pixel_format  = OT_PIXEL_FORMAT_YVU_SEMIPLANAR_420;
-    ext.compress_mode = OT_COMPRESS_MODE_NONE;
-    ext.frame_rate.src_frame_rate = -1;
-    ext.frame_rate.dst_frame_rate = -1;
-    ret = ss_mpi_vpss_set_ext_chn_attr(0, NPU_EXT_CHN, &ext);
-    if (ret != TD_SUCCESS) { printf("[npu] set_ext_chn_attr failed %#x\n", ret); return -1; }
-    ret = ss_mpi_vpss_enable_chn(0, NPU_EXT_CHN);
-    if (ret != TD_SUCCESS) { printf("[npu] enable ext chn failed %#x\n", ret); return -1; }
-    return 0;
 }
 
 /* 模型输入坐标(含灰边) -> 内容区千分比 */
@@ -6227,12 +6473,29 @@ static int cam_npu_cls_ok(int cls)
     return 0;
 }
 
+/* 把解析好的一批框提交给 g_npu_box (加保持时间, 免得框闪). 各解析器共用. */
+static void cam_npu_commit(const cam_npu_box *box, int j)
+{
+    unsigned long long now = sample_common_svp_npu_get_timestamp();   /* ms */
+    pthread_mutex_lock(&g_npu_lock);
+    if (j > 0) {                                                 /* 有目标: 换上新的一批 */
+        (td_void)memcpy_s(g_npu_box, sizeof(g_npu_box), box, sizeof(cam_npu_box) * NPU_MAX_DET);
+        g_npu_box_n = j;
+        g_npu_last_num = j;
+        g_npu_hit_ms = now;
+    } else if (g_npu_box_n > 0 && now - g_npu_hit_ms > NPU_HOLD_MS) {
+        g_npu_box_n = 0;                                         /* 空窗超过保持时间才清 */
+        g_npu_last_num = 0;
+    }
+    pthread_mutex_unlock(&g_npu_lock);
+}
+
 /* 解析一次推理结果 -> g_npu_box (千分比坐标 + 类别 + 置信度). 返回目标数, 失败 -1.
  * .om 里已带 NMS. 实测本模型 (yolov8.om): num 张量 'output0' 末维=1 = 目标总数;
  * roi 张量 'output0_' 有 6 "行", 行间隔 stride 字节:
  *   行0..3 = xmin/ymin/xmax/ymax (模型输入 640 空间), 行4 = 置信度 0..1, 行5 = 类别号.
  * 行数/类别数都从 buffer_size/stride 和 dims 现场算, 不写死 —— 换模型也不会跑飞. */
-static int cam_npu_parse(void)
+static int cam_npu_parse_rpn(void)
 {
     sample_svp_npu_model_info *mi = sample_common_svp_npu_get_model_info(0);
     svp_acl_mdl_io_dims dims;
@@ -6240,7 +6503,6 @@ static int cam_npu_parse(void)
     size_t num_idx = 0, roi_idx = 0, rstride, rsize, rows, fs;
     td_float *nd = TD_NULL, *rd = TD_NULL, *xmin, *ymin, *xmax, *ymax, *score, *clsrow;
     cam_npu_box box[NPU_MAX_DET] = {{0}};
-    unsigned long long now;
     int ncls, c, i, j = 0, total = 0;
 
     if (mi == TD_NULL || mi->model_desc == TD_NULL) { return -1; }
@@ -6290,18 +6552,7 @@ static int cam_npu_parse(void)
         }
     }
 
-    now = sample_common_svp_npu_get_timestamp();                 /* ms */
-    pthread_mutex_lock(&g_npu_lock);
-    if (j > 0) {                                                 /* 有目标: 换上新的一批 */
-        (td_void)memcpy_s(g_npu_box, sizeof(g_npu_box), box, sizeof(box));
-        g_npu_box_n = j;
-        g_npu_last_num = j;
-        g_npu_hit_ms = now;
-    } else if (g_npu_box_n > 0 && now - g_npu_hit_ms > NPU_HOLD_MS) {
-        g_npu_box_n = 0;                                         /* 空窗超过保持时间才清 */
-        g_npu_last_num = 0;
-    }
-    pthread_mutex_unlock(&g_npu_lock);
+    cam_npu_commit(box, j);
 
     if (!g_npu_layout_logged && total > 0) {   /* 有目标时才打, 否则看不到样本值 */
         g_npu_layout_logged = 1;
@@ -6313,6 +6564,182 @@ static int cam_npu_parse(void)
             (score != TD_NULL) ? score[0] : -1.0f, (clsrow != TD_NULL) ? clsrow[0] : -1.0f);
     }
     return j;                                  /* 过完门槛后剩下的目标数 */
+}
+
+/* ===== YuNet(自转的裸输出人脸模型) 解码 =====
+ * 三尺度 stride 8/16/32, 每个格点一个候选(无 anchor):
+ *   score = sqrt(clamp(cls) * clamp(obj))       —— sigmoid 已在模型里做完
+ *   cx = (列 + bbox0) * s    cy = (行 + bbox1) * s
+ *   w  = exp(bbox2) * s      h  = exp(bbox3) * s
+ *   关键点 kx = (列 + kps[2k]) * s, ky = (行 + kps[2k+1]) * s
+ *     顺序 = 右眼 / 左眼 / 鼻尖 / 右嘴角 / 左嘴角 —— 前两个就是眼控对焦要的
+ * (= OpenCV FaceDetectorYN 对 opencv_zoo 2023mar 权重的解码方式.) NMS 自己做. */
+
+/* 输出张量取值器: NPU 的输出可能是「单行连续」「每格点一行」「每通道一行」三种摆法,
+ * 现场用 size/stride/格点数 判出来, 别写死 —— 换个 atc 版本布局就可能变. */
+typedef struct {
+    const td_float *d;
+    size_t fs;        /* 一行有多少个 float */
+    int rows;         /* 行数 = size / stride */
+    int per;          /* 每个格点几个数 (cls/obj=1, bbox=4, kps=10) */
+    int layout;       /* 0=单行连续, 1=每格点一行, 2=每通道一行 */
+} cam_tensor;
+
+static int cam_npu_tensor(size_t idx, int na, int per, cam_tensor *t)
+{
+    svp_acl_data_buffer *b = svp_acl_mdl_get_dataset_buffer(g_npu_task.output_dataset, idx);
+    size_t stride, size;
+    if (b == TD_NULL) { return -1; }
+    t->d = (const td_float *)svp_acl_get_data_buffer_addr(b);
+    stride = svp_acl_get_data_buffer_stride(b);
+    size = svp_acl_get_data_buffer_size(b);
+    if (t->d == TD_NULL || stride == 0) { return -1; }
+    t->fs = stride / sizeof(td_float);
+    t->rows = (int)(size / stride);
+    t->per = per;
+    if (t->rows <= 1) {
+        t->layout = 0;
+        if (t->fs < (size_t)na * (size_t)per) { return -1; }      /* 数据不够, 宁可不解析 */
+    } else if (t->rows >= na) {
+        t->layout = 1;
+        if (t->fs < (size_t)per) { return -1; }
+    } else {
+        t->layout = 2;
+        if (t->rows < per || t->fs < (size_t)na) { return -1; }
+    }
+    return 0;
+}
+
+static td_float cam_t_get(const cam_tensor *t, int i, int k)
+{
+    if (t->layout == 0) { return t->d[(size_t)i * (size_t)t->per + (size_t)k]; }
+    if (t->layout == 1) { return t->d[(size_t)i * t->fs + (size_t)k]; }
+    return t->d[(size_t)k * t->fs + (size_t)i];
+}
+
+#define YUNET_CAND 64          /* NMS 前保留的候选上限 */
+typedef struct {
+    td_float x0, y0, x1, y1, sc;
+    td_float kx[NPU_KPS], ky[NPU_KPS];
+    int nkp;
+} cam_face;
+
+static td_float cam_face_iou(const cam_face *a, const cam_face *b)
+{
+    td_float ix0 = (a->x0 > b->x0) ? a->x0 : b->x0;
+    td_float iy0 = (a->y0 > b->y0) ? a->y0 : b->y0;
+    td_float ix1 = (a->x1 < b->x1) ? a->x1 : b->x1;
+    td_float iy1 = (a->y1 < b->y1) ? a->y1 : b->y1;
+    td_float iw = ix1 - ix0, ih = iy1 - iy0, inter, uni;
+    if (iw <= 0.0f || ih <= 0.0f) { return 0.0f; }
+    inter = iw * ih;
+    uni = (a->x1 - a->x0) * (a->y1 - a->y0) + (b->x1 - b->x0) * (b->y1 - b->y0) - inter;
+    return (uni > 0.0f) ? (inter / uni) : 0.0f;
+}
+
+static int cam_npu_parse_yunet(void)
+{
+    static cam_face cand[YUNET_CAND];     /* 4KB 级, 别放线程栈 */
+    static int used[YUNET_CAND];
+    cam_npu_box box[NPU_MAX_DET] = {{0}};
+    int mw = (int)g_npu_insize.width, mh = (int)g_npu_insize.height;
+    td_float thr = (td_float)g_npu_score / 100.0f;
+    td_float iou_th = (td_float)g_npu_nms / 100.0f;
+    int nc = 0, s, i, k, j = 0;
+
+    if (mw <= 0 || mh <= 0) { return -1; }
+    for (s = 0; s < YUNET_SCALES; s++) {
+        cam_tensor tc, to, tb, tk;
+        int st = g_yunet_stride[s];
+        int cols = mw / st, rws = mh / st, na = cols * rws;
+        int has_kp;
+        if (g_yunet[s].ok == 0 || na <= 0) { continue; }
+        has_kp = (g_yunet[s].ok == 2);
+        if (cam_npu_tensor(g_yunet[s].cls,  na, 1, &tc) != 0) { continue; }
+        if (cam_npu_tensor(g_yunet[s].obj,  na, 1, &to) != 0) { continue; }
+        if (cam_npu_tensor(g_yunet[s].bbox, na, 4, &tb) != 0) { continue; }
+        if (has_kp && cam_npu_tensor(g_yunet[s].kps, na, NPU_KPS * 2, &tk) != 0) { has_kp = 0; }
+        if (!g_npu_layout_logged) {
+            printf("[npu] yunet 尺度%d: 格点 %dx%d=%d, cls行数=%d layout=%d, bbox行数=%d layout=%d, 关键点=%d\n",
+                st, cols, rws, na, tc.rows, tc.layout, tb.rows, tb.layout, has_kp);
+        }
+        for (i = 0; i < na; i++) {
+            td_float cs = cam_t_get(&tc, i, 0), os = cam_t_get(&to, i, 0), sc;
+            td_float cx, cy, w, h;
+            int col = i % cols, row = i / cols, slot;
+            if (cs < 0.0f) { cs = 0.0f; } else if (cs > 1.0f) { cs = 1.0f; }
+            if (os < 0.0f) { os = 0.0f; } else if (os > 1.0f) { os = 1.0f; }
+            sc = sqrtf(cs * os);
+            if (sc < thr) { continue; }
+            cx = ((td_float)col + cam_t_get(&tb, i, 0)) * (td_float)st;
+            cy = ((td_float)row + cam_t_get(&tb, i, 1)) * (td_float)st;
+            w  = expf(cam_t_get(&tb, i, 2)) * (td_float)st;
+            h  = expf(cam_t_get(&tb, i, 3)) * (td_float)st;
+            /* 反着写: NaN 参与比较全是 false, 这样脏数据也会被挡掉而不是漏过去 */
+            if (!(w > 1.0f && h > 1.0f && w <= (td_float)(mw * 2) && h <= (td_float)(mh * 2))) { continue; }
+            slot = nc;
+            if (nc >= YUNET_CAND) {                    /* 候选满了: 顶掉分最低的 */
+                int worst = 0;
+                for (k = 1; k < YUNET_CAND; k++) {
+                    if (cand[k].sc < cand[worst].sc) { worst = k; }
+                }
+                if (cand[worst].sc >= sc) { continue; }
+                slot = worst;
+            } else {
+                nc++;
+            }
+            cand[slot].x0 = cx - w / 2.0f; cand[slot].y0 = cy - h / 2.0f;
+            cand[slot].x1 = cx + w / 2.0f; cand[slot].y1 = cy + h / 2.0f;
+            cand[slot].sc = sc;
+            cand[slot].nkp = 0;
+            if (has_kp) {
+                for (k = 0; k < NPU_KPS; k++) {
+                    cand[slot].kx[k] = ((td_float)col + cam_t_get(&tk, i, 2 * k))     * (td_float)st;
+                    cand[slot].ky[k] = ((td_float)row + cam_t_get(&tk, i, 2 * k + 1)) * (td_float)st;
+                }
+                cand[slot].nkp = NPU_KPS;
+            }
+        }
+    }
+    g_npu_layout_logged = 1;     /* 布局信息第一遍就全了(不像 RPN 要等有目标), 打一次就够 */
+
+    /* NMS: 每轮挑当前最高分, 把和它重叠超过阈值的都压掉 */
+    for (i = 0; i < nc; i++) { used[i] = 0; }
+    while (j < NPU_MAX_DET) {
+        int best = -1;
+        td_float bs = 0.0f;
+        for (i = 0; i < nc; i++) {
+            if (!used[i] && cand[i].sc > bs) { bs = cand[i].sc; best = i; }
+        }
+        if (best < 0) { break; }
+        used[best] = 1;
+        for (i = 0; i < nc; i++) {
+            if (used[i]) { continue; }
+            if (cam_face_iou(&cand[best], &cand[i]) > iou_th) { used[i] = 1; }
+        }
+        box[j].x0 = cam_lb_x(cand[best].x0);       /* 模型输入(含灰边)空间 -> 内容区千分比 */
+        box[j].y0 = cam_lb_y(cand[best].y0);
+        box[j].x1 = cam_lb_x(cand[best].x1);
+        box[j].y1 = cam_lb_y(cand[best].y1);
+        box[j].cls = -1;                           /* 人脸没有 COCO 类别 */
+        box[j].score = (int)(cand[best].sc * 100.0f + 0.5f);
+        if (box[j].score > 100) { box[j].score = 100; }
+        box[j].nkp = cand[best].nkp;
+        for (k = 0; k < cand[best].nkp && k < NPU_KPS; k++) {
+            box[j].kx[k] = cam_lb_x(cand[best].kx[k]);
+            box[j].ky[k] = cam_lb_y(cand[best].ky[k]);
+        }
+        j++;
+    }
+    cam_npu_commit(box, j);
+    return j;
+}
+
+/* 按模型类别分派 */
+static int cam_npu_parse(void)
+{
+    if (g_npu_kind == NPU_KIND_YUNET) { return cam_npu_parse_yunet(); }
+    return cam_npu_parse_rpn();
 }
 
 /* 把扩展通道的一帧(640x360 YUV420SP)拷进模型输入缓冲区的内容区, 上下灰边不动.
@@ -6340,39 +6767,108 @@ static td_s32 cam_npu_letterbox(const ot_video_frame_info *f)
     return TD_SUCCESS;
 }
 
-/* 推理线程: 取扩展通道帧 -> (每N帧) 补边拷贝喂 NPU -> 推理 -> 解析 -> 缓存(画框由 OSD 线程做). */
+/* ===== 峰值对焦描边 + 过曝斑马纹 =====
+ * 在扩展通道那帧的 Y 平面上直接算(不用再要一路帧, 也不用碰编码通道):
+ *   描边 = 简单梯度 |左右差| + |上下差| 超过门槛 —— 合焦的地方边缘最锐, 描出来的点最密,
+ *          手动拧镜头时看哪个位置描得最满就是合焦(比看焦点值数字直观)。
+ *   斑马纹 = 亮度超过门槛的像素, 按 (x+y)/8 的奇偶打成 45° 斜纹, 一眼看出哪儿过曝了。
+ * 结果写成 1bit/像素的掩膜, 由 OSD 线程铺到叠加层(见 cam_vis_blit)。 */
+#define VIS_PERIOD_MS 150          /* 最快多久算一次 —— 比 OSD 重画(200ms)略快就够 */
+
+static void cam_vis_analyze(const ot_video_frame_info *f)
+{
+    /* 线程私有暂存区: 先算完再整块拷进共享掩膜, 持锁时间压到一次 memcpy */
+    static unsigned char pk[VIS_MASK_BYTES];
+    static unsigned char zb[VIS_MASK_BYTES];
+    const ot_video_frame *v = &f->video_frame;
+    const unsigned char *y;
+    int w, h, sstride, r, c, gth, zth;
+    int peak = g_peak_en, zeb = g_zebra_en;
+    td_u64 t0;
+
+    if (g_npu_vb_virt == TD_NULL || (!peak && !zeb)) { return; }
+    w = (int)v->width; h = (int)v->height; sstride = (int)v->stride[0];
+    if (w > VIS_MASK_W) { w = VIS_MASK_W; }
+    if (h > VIS_MASK_H) { h = VIS_MASK_H; }
+    if (w < 8 || h < 8 || sstride <= 0) { return; }
+    y = (const unsigned char *)g_npu_vb_virt + (v->phys_addr[0] - g_npu_vb_pool.pool_phy_addr);
+
+    t0 = sample_common_svp_npu_get_timestamp();
+    (td_void)memset_s(pk, sizeof(pk), 0, sizeof(pk));
+    (td_void)memset_s(zb, sizeof(zb), 0, sizeof(zb));
+    /* 灵敏度 1..100 -> 梯度门槛 80..4 (调高灵敏度 = 门槛降低 = 描得更多) */
+    gth = 4 + (100 - g_peak_th) * 76 / 100;
+    zth = g_zebra_th;
+    for (r = 1; r < h - 1; r++) {
+        const unsigned char *p  = y + (size_t)r * sstride;
+        const unsigned char *pu = p - sstride;
+        const unsigned char *pd = p + sstride;
+        unsigned char *pkr = pk + (size_t)r * VIS_MASK_STRIDE;
+        unsigned char *zbr = zb + (size_t)r * VIS_MASK_STRIDE;
+        for (c = 1; c < w - 1; c++) {
+            unsigned char bit = (unsigned char)(0x80 >> (c & 7));
+            if (zeb && p[c] >= zth && ((((c + r) >> 3) & 1) == 0)) {
+                zbr[c >> 3] |= bit;                    /* 8 像素宽的 45° 斜纹 */
+            }
+            if (peak) {
+                int gx = (int)p[c + 1] - (int)p[c - 1];
+                int gy = (int)pd[c] - (int)pu[c];
+                if (gx < 0) { gx = -gx; }
+                if (gy < 0) { gy = -gy; }
+                if (gx + gy >= gth) { pkr[c >> 3] |= bit; }
+            }
+        }
+    }
+    pthread_mutex_lock(&g_vis_lock);
+    (td_void)memcpy_s(g_peak_mask, sizeof(g_peak_mask), pk, sizeof(pk));
+    (td_void)memcpy_s(g_zebra_mask, sizeof(g_zebra_mask), zb, sizeof(zb));
+    g_vis_mw = w; g_vis_mh = h;
+    pthread_mutex_unlock(&g_vis_lock);
+    g_vis_ms = (int)(sample_common_svp_npu_get_timestamp() - t0);
+}
+
+/* 这一路帧的消费者: 检测 / 描边 / 斑马纹, 有一个要就得取帧 */
+static int cam_vis_want(void)
+{
+    return (g_npu_en && g_npu_ready) || g_peak_en || g_zebra_en;
+}
+
+/* 视觉线程: 取扩展通道帧 -> (限速) 算描边/斑马纹 -> (每N帧) 补边喂 NPU 推理 -> 解析.
+ * 画面上的东西一律由 OSD 线程画(单一写者), 这里只更新数据。 */
 static void *cam_npu_thread(void *arg)
 {
     ot_video_frame_info frame;
     td_s32 ret;
     int fno = 0, nlog = 0;
+    unsigned long long last_vis = 0;     /* 上次算描边/斑马纹的时刻, 用来限速 */
     (td_void)arg;
-    (td_void)prctl(PR_SET_NAME, "cam_npu", 0, 0, 0);
+    (td_void)prctl(PR_SET_NAME, "cam_vis", 0, 0, 0);
     (td_void)svp_acl_rt_set_device(NPU_DEV_ID);   /* 本线程绑 NPU 设备 */
 
     while (!g_npu_stop) {
-        if (!g_npu_en) {                       /* web 关掉了: 清空框(OSD 线程随即擦掉画面) */
-            if (g_npu_box_n != 0) {
-                pthread_mutex_lock(&g_npu_lock);
-                g_npu_box_n = 0; g_npu_last_num = 0;
-                pthread_mutex_unlock(&g_npu_lock);
-            }
-            usleep(200000);
-            continue;
+        int do_npu, do_vis;
+        unsigned long long now;
+        if (!g_npu_en && g_npu_box_n != 0) {   /* 检测被关掉: 清空框(OSD 线程随即擦掉画面) */
+            pthread_mutex_lock(&g_npu_lock);
+            g_npu_box_n = 0; g_npu_last_num = 0;
+            pthread_mutex_unlock(&g_npu_lock);
         }
+        if (!cam_vis_want()) { usleep(200000); continue; }   /* 三个消费者都不要帧 */
         ret = ss_mpi_vpss_get_chn_frame(0, NPU_EXT_CHN, &frame, 2000);
         if (ret != TD_SUCCESS) { usleep(20000); continue; }
-        if ((++fno % g_npu_interval) != 0) {
-            (td_void)ss_mpi_vpss_release_chn_frame(0, NPU_EXT_CHN, &frame);
-            continue;
-        }
         /* 首帧: 映射该帧所在 VB 池一次, 之后零拷贝 */
         if (g_npu_vb_virt == TD_NULL) {
             if (ss_mpi_vb_get_pool_info((ot_vb_pool)frame.pool_id, &g_npu_vb_pool) == TD_SUCCESS) {
                 g_npu_vb_virt = ss_mpi_sys_mmap(g_npu_vb_pool.pool_phy_addr, (td_u32)g_npu_vb_pool.pool_size);
             }
         }
-        if (g_npu_vb_virt != TD_NULL) {
+        fno++;
+        do_npu = (g_npu_en && g_npu_ready && (fno % g_npu_interval) == 0);
+        now = sample_common_svp_npu_get_timestamp();
+        do_vis = (g_peak_en || g_zebra_en) && (now - last_vis >= VIS_PERIOD_MS);
+        if (do_vis) { last_vis = now; }
+        if (g_npu_vb_virt != TD_NULL && do_vis) { cam_vis_analyze(&frame); }
+        if (g_npu_vb_virt != TD_NULL && do_npu) {
             ret = cam_npu_letterbox(&frame);       /* 等比画面拷进灰底输入缓冲区 */
             if (ret == TD_SUCCESS) {
                 td_u64 t0 = sample_common_svp_npu_get_timestamp();
@@ -6386,9 +6882,10 @@ static void *cam_npu_thread(void *arg)
                         int i;
                         printf("[npu] frame#%d 目标=%d (%d ms)\n", fno, n, g_npu_ms);
                         for (i = 0; i < n && i < NPU_MAX_DET; i++) {
-                            printf("   %s %d%% (%d,%d)-(%d,%d)‰\n", cam_coco_name(g_npu_box[i].cls),
+                            printf("   %s %d%% (%d,%d)-(%d,%d)‰%s\n", cam_det_name(g_npu_box[i].cls),
                                 g_npu_box[i].score, g_npu_box[i].x0, g_npu_box[i].y0,
-                                g_npu_box[i].x1, g_npu_box[i].y1);
+                                g_npu_box[i].x1, g_npu_box[i].y1,
+                                (g_npu_box[i].nkp >= 2) ? " [有眼睛坐标]" : "");
                         }
                     }
                 }
@@ -6399,11 +6896,40 @@ static void *cam_npu_thread(void *arg)
     return TD_NULL;
 }
 
-/* 启动 NPU 检测 (由 sample_venc_web 在所有通道就绪后调用, 受 g_npu_en 控制). 非致命. */
+/* 起视觉线程(幂等). 检测和描边/斑马纹共用这一个线程. */
+static void cam_vis_thread_start(void)
+{
+    if (g_npu_th_run) { return; }
+    g_npu_stop = 0;
+    if (pthread_create(&g_npu_th, TD_NULL, cam_npu_thread, TD_NULL) != 0) {
+        printf("[vis] thread create failed\n");
+        return;
+    }
+    g_npu_th_run = 1;
+}
+
+/* 只为描边/斑马纹要帧(没有模型也能跑): 开默认尺寸的扩展通道 + 起线程. 非致命. */
+static void cam_vis_start(void)
+{
+    if (cam_vis_chn_start(VIS_MASK_W, VIS_MASK_H) != 0) {
+        printf("[vis] 扩展通道起不来 -> 描边/斑马纹不可用(相机不受影响)\n");
+        return;
+    }
+    cam_vis_thread_start();
+    printf("[vis] 取景辅助已启动 (描边=%d 斑马纹=%d, %dx%d)\n",
+        g_peak_en, g_zebra_en, VIS_MASK_W, VIS_MASK_H);
+}
+
+/* 启动 NPU 检测 (由 sample_venc_web 在所有通道就绪后调用, 受 g_npu_en 控制). 非致命.
+ * 模型起不来时, 只要描边/斑马纹还开着就退回"只取景辅助"模式, 别把这一路帧一起关掉. */
 static void cam_npu_start(void)
 {
-    if (cam_npu_init() != 0) { printf("[npu] init failed -> detection disabled (camera unaffected)\n"); return; }
-    if (cam_npu_ext_chn_start() != 0) {
+    if (cam_npu_init() != 0) {
+        printf("[npu] init failed -> detection disabled (camera unaffected)\n");
+        if (g_peak_en || g_zebra_en) { cam_vis_start(); }
+        return;
+    }
+    if (cam_vis_chn_start(g_npu_cw, g_npu_ch) != 0) {
         printf("[npu] ext chn failed -> detection disabled\n");
         (td_void)sample_common_svp_npu_destroy_work_buf(&g_npu_task);
         (td_void)sample_common_svp_npu_destroy_task_buf(&g_npu_task);
@@ -6413,11 +6939,8 @@ static void cam_npu_start(void)
         return;
     }
     g_npu_ready = 1;
-    g_npu_stop = 0;
-    if (pthread_create(&g_npu_th, TD_NULL, cam_npu_thread, TD_NULL) != 0) {
-        printf("[npu] thread create failed\n"); g_npu_ready = 0; return;
-    }
-    g_npu_th_run = 1;
+    cam_vis_thread_start();
+    if (!g_npu_th_run) { g_npu_ready = 0; return; }
     printf("[npu] detection started (%s, ext chn %d, %ux%u, every %d frames)\n",
         g_npu_model, NPU_EXT_CHN, g_npu_insize.width, g_npu_insize.height, g_npu_interval);
 }
@@ -6441,6 +6964,69 @@ static void cam_npu_switch(const char *name)
         (td_void)snprintf(g_npu_model, sizeof(g_npu_model), "%s", old);
         cam_npu_start();
     }
+}
+
+/* GET /peak -> 取景辅助(峰值描边 + 斑马纹)状态. w/h = 掩膜实际算的分辨率 */
+static void cam_http_peak(int fd)
+{
+    char j[192];
+    int n = snprintf(j, sizeof(j),
+        "{\"peak\":%d,\"th\":%d,\"color\":%d,\"zebra\":%d,\"zth\":%d,\"ms\":%d,\"w\":%d,\"h\":%d}",
+        g_peak_en, g_peak_th, g_peak_color, g_zebra_en, g_zebra_th, g_vis_ms, g_vis_mw, g_vis_mh);
+    cam_http_body(fd, "application/json", j, n);
+}
+
+/* GET /setpeak?peak=&th=&color=&zebra=&zth= : 立即生效 + 存 param.
+ * 从"两个都关"变成"有开着"时, 扩展通道/视觉线程可能还没起(比如检测是关的), 这里补起来. */
+static void cam_http_setpeak(int fd, const char *req)
+{
+    char v[16];
+    int changed = 0;
+    if (cam_qparam(req, "peak", v, sizeof(v))) {
+        pthread_mutex_lock(&g_cfg_lock);
+        g_peak_en = atoi(v) ? 1 : 0;
+        pthread_mutex_unlock(&g_cfg_lock);
+        changed = 1;
+    }
+    if (cam_qparam(req, "th", v, sizeof(v))) {
+        int t = atoi(v);
+        if (t < 1) { t = 1; }
+        if (t > 100) { t = 100; }
+        pthread_mutex_lock(&g_cfg_lock);
+        g_peak_th = t;
+        pthread_mutex_unlock(&g_cfg_lock);
+        changed = 1;
+    }
+    if (cam_qparam(req, "color", v, sizeof(v))) {
+        pthread_mutex_lock(&g_cfg_lock);
+        g_peak_color = atoi(v) & 3;
+        pthread_mutex_unlock(&g_cfg_lock);
+        changed = 1;
+    }
+    if (cam_qparam(req, "zebra", v, sizeof(v))) {
+        pthread_mutex_lock(&g_cfg_lock);
+        g_zebra_en = atoi(v) ? 1 : 0;
+        pthread_mutex_unlock(&g_cfg_lock);
+        changed = 1;
+    }
+    if (cam_qparam(req, "zth", v, sizeof(v))) {
+        int t = atoi(v);
+        if (t < 100) { t = 100; }
+        if (t > 255) { t = 255; }
+        pthread_mutex_lock(&g_cfg_lock);
+        g_zebra_th = t;
+        pthread_mutex_unlock(&g_cfg_lock);
+        changed = 1;
+    }
+    if (changed) { cam_cfg_save(); }
+    if (g_peak_en || g_zebra_en) {          /* 两个函数都是幂等的, 已经起来了就直接返回 */
+        if (g_vis_chn_w == 0) { cam_vis_start(); } else { cam_vis_thread_start(); }
+    } else {                                 /* 都关了: 掩膜作废, 免得下次开的瞬间闪一帧旧的 */
+        pthread_mutex_lock(&g_vis_lock);
+        g_vis_mw = 0; g_vis_mh = 0;
+        pthread_mutex_unlock(&g_vis_lock);
+    }
+    cam_http_text(fd, "已保存");
 }
 
 /* GET /models -> 列出 /tmp/model 与 /opt/model 下的 .om (名字/大小/是否当前) */
@@ -6473,25 +7059,31 @@ static void cam_http_models(int fd)
 /* GET /npu -> 检测状态 + 最近一帧目标 (坐标换算到 720p 预览像素, w/h 给出参考画幅) */
 static void cam_http_npu(int fd)
 {
-    char j[2048];
+    char j[4096];
     cam_npu_box b[NPU_MAX_DET];
-    int n = 0, i, cnt;
+    int n = 0, i, k, cnt;
     pthread_mutex_lock(&g_npu_lock);
     cnt = g_npu_box_n;
     (td_void)memcpy_s(b, sizeof(b), g_npu_box, sizeof(g_npu_box));
     pthread_mutex_unlock(&g_npu_lock);
     n += snprintf(j + n, sizeof(j) - n,
         "{\"en\":%d,\"ready\":%d,\"draw\":%d,\"interval\":%d,\"score\":%d,\"nms\":%d,"
-        "\"cls\":\"%s\",\"ms\":%d,\"w\":%d,\"h\":%d,\"n\":%d,\"det\":[",
+        "\"cls\":\"%s\",\"ms\":%d,\"w\":%d,\"h\":%d,\"kind\":\"%s\",\"model\":\"%s\",\"n\":%d,\"det\":[",
         g_npu_en, g_npu_ready, g_npu_draw, g_npu_interval, g_npu_score, g_npu_nms,
-        g_npu_cls, g_npu_ms, DET_W, DET_H, cnt);
-    for (i = 0; i < cnt && i < NPU_MAX_DET && n < (int)sizeof(j) - 120; i++) {
+        g_npu_cls, g_npu_ms, DET_W, DET_H,
+        (g_npu_kind == NPU_KIND_YUNET) ? "face" : "coco", g_npu_model, cnt);
+    for (i = 0; i < cnt && i < NPU_MAX_DET && n < (int)sizeof(j) - 260; i++) {
         int x0 = b[i].x0 * DET_W / 1000, x1 = b[i].x1 * DET_W / 1000;
         int y0 = b[i].y0 * DET_H / 1000, y1 = b[i].y1 * DET_H / 1000;
         n += snprintf(j + n, sizeof(j) - n,
-            "%s{\"x\":%d,\"y\":%d,\"w\":%d,\"h\":%d,\"c\":%d,\"s\":%d,\"n\":\"%s\"}",
+            "%s{\"x\":%d,\"y\":%d,\"w\":%d,\"h\":%d,\"c\":%d,\"s\":%d,\"n\":\"%s\",\"kp\":[",
             (i > 0) ? "," : "", x0, y0, x1 - x0, y1 - y0, b[i].cls, b[i].score,
-            cam_coco_name(b[i].cls));
+            cam_det_name(b[i].cls));
+        for (k = 0; k < b[i].nkp && k < NPU_KPS; k++) {     /* 关键点也换算到 720p 像素 */
+            n += snprintf(j + n, sizeof(j) - n, "%s[%d,%d]", (k > 0) ? "," : "",
+                b[i].kx[k] * DET_W / 1000, b[i].ky[k] * DET_H / 1000);
+        }
+        n += snprintf(j + n, sizeof(j) - n, "]}");
     }
     n += snprintf(j + n, sizeof(j) - n, "]}");
     cam_http_body(fd, "application/json", j, n);
@@ -6541,7 +7133,9 @@ static void cam_http_setnpu(int fd, const char *req)
         pthread_mutex_lock(&g_cfg_lock);
         g_npu_nms = nv;
         pthread_mutex_unlock(&g_cfg_lock);
-        if (g_npu_ready) {                               /* 阈值张量可以在线改, 不用重载模型 */
+        /* 厂商 RPN 模型: 阈值张量可以在线改, 不用重载模型.
+         * 裸输出模型(YuNet): NMS 在解析里做, g_npu_nms 改完下一帧就生效, 什么都不用调. */
+        if (g_npu_ready && g_npu_kind == NPU_KIND_RPN) {
             sample_svp_npu_threshold th;
             (td_void)memset_s(&th, sizeof(th), 0, sizeof(th));
             th.nms_threshold = (float)g_npu_nms / 100.0f; th.score_threshold = 0.10f;
@@ -6716,8 +7310,10 @@ static td_s32 sample_venc_web(td_void)
 
     /* NPU 目标检测 (YOLOv8): 所有通道已就绪, 建扩展通道 + 起推理线程. 受 g_npu_en 控制. 非致命. */
     if (g_npu_en) { cam_npu_start(); }
+    /* 检测关着但存了"峰值描边/斑马纹": 也得把扩展通道和视觉线程起来 */
+    if (!g_npu_ready && (g_peak_en || g_zebra_en)) { cam_vis_start(); }
 
-    /* web server :8080 in this thread */
+/* web server :8080 in this thread */
     listen_fd = socket(AF_INET, SOCK_STREAM, 0);
     setsockopt(listen_fd, SOL_SOCKET, SO_REUSEADDR, &opt, sizeof(opt));
     (td_void)memset_s(&addr, sizeof(addr), 0, sizeof(addr));

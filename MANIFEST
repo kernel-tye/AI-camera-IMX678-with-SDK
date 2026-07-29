@@ -5,3 +5,12 @@ mpp/sample/Makefile.param
 mpp/sample/common/sample_comm_vi.c
 mpp/sample/common/sample_comm_isp.c
 mpp/sample/venc/sample_venc.c
+# venc/Makefile: TARGET 从"每个 .c 一个可执行"改成单一 sample_venc(否则多出来的 .c
+# 会各自变成一个 target 而不是链进来), 外加 -I../svp/common 找 svp_npu 头文件
+mpp/sample/venc/Makefile
+# NPU 胶水: 从 mpp/sample/svp/common/ 复制进 venc/ 的两对文件
+# (model.c 已删掉 HRNET 那几个函数, 否则会拖进 ss_mpi_vgs_* 依赖)
+mpp/sample/venc/sample_common_svp_npu.c
+mpp/sample/venc/sample_common_svp_npu.h
+mpp/sample/venc/sample_common_svp_npu_model.c
+mpp/sample/venc/sample_common_svp_npu_model.h
