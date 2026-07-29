@@ -27,11 +27,13 @@ cd /path/to/.../a55_linux/source/mpp/sample/venc/tianyuan_pkg && ./build_firmwar
 
 ### 当前状态（2026-07-29）
 
-> ⚠️ **仓库领先 flash 一个版本**:`src/` 已含人脸检测 / 眼控对焦 / 峰值描边 / 斑马纹,
-> 编译通过并在板子 `/tmp` 上跑通验证,但**还没固化**。flash 里仍是 `97e58889`,
-> `user.squashfs` 也还是那一版。要用新功能得重新 `build_firmware.sh` + 烧 mtd5。
+- **flash 里(物理板子在跑)= `d77a8d3f`**(`user.squashfs` 即此版, 12.27MB / mtd5 上限 22020096,
+  还剩约 9.3MB):**人脸检测 + 眼控对焦 + 取景辅助已固化并重启验证**
+  (回读 md5 与镜像一致 → reboot → `/opt/bin/sample_venc` = `d77a8d3f`,
+  YuNet 开机自动从 `/opt/model/` 加载, 全接口正常)
+- `/opt/model/` 现有三个模型:`yolov8.om` / `yolov7.om` / **`yunet_face_aipp.om`**,网页可热切换
 
-#### 已验证但未固化（2026-07-29）
+#### 本轮固化进去的（2026-07-29）
 - **人脸检测**:`yunet_face_aipp.om`(YuNet, 265KB)—— 裸输出,解码 + NMS 在 A55 上做。
   **推理仅 2-3ms**(yolov7 是 24ms)。载入时按输出张量名**自动判型**(`cls_8/bbox_8/obj_8/kps_8` → YuNet),
   换模型不用改代码。实测检出率 146/150 帧,置信度 ~60%
@@ -46,8 +48,8 @@ cd /path/to/.../a55_linux/source/mpp/sample/venc/tianyuan_pkg && ./build_firmwar
 - **`MANIFEST` 与 `src/` 对齐**:补上了 `venc/Makefile` + `sample_common_svp_npu{,_model}.{c,h}`
   —— 之前 `apply.sh` 覆盖纯净 SDK 时会漏掉它们,编不出 NPU 版
 
-#### flash 里那一版（`97e58889`, 2026-07-26）
-- **flash 里(物理板子在跑)= `97e58889`**(`user.squashfs` 即此版, 11.6MB):**NPU 检测 + 相机手动挡已固化并重启验证**
+#### 更早已固化的（`97e58889`, 2026-07-26 起就在里面）
+- **NPU 检测 + 相机手动挡**(以下功能自 `97e58889` 起就已固化并重启验证过)
   - **曝光 P/S/M 三挡**:S 只锁快门(增益仍自动), M 快门+增益全锁死(实测 1/1000s ISO 100 平均亮度掉到 1);曝光补偿 / 自动挡最长快门可调;读回当前快门/增益/ISO/帧率/平均亮度
   - **亮度直方图**(ISP 硬件 1024bin 归 64 格, `/hist`)
   - **对焦区跟 AI 主体走**:AF 统计从固定中心 3x3 改成跟检测框(映射到 15x17 网格), 画面上黄框实时跟随 —— 换人脸模型即是眼控对焦

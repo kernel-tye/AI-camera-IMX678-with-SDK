@@ -39,8 +39,20 @@ chmod +x "$HERE/opt_build/bin/sample_venc"
 cp -P "$SRC"/out/lib/libsvp_acl.so "$SRC"/out/lib/libsvp_acl_sec.so \
       "$SRC"/out/lib/libsvp_aicpu.so "$SRC"/out/lib/libprotobuf-c.so* "$HERE/opt_build/lib/"
 mkdir -p "$HERE/opt_build/model"
+# 厂商模型(从 SDK 取, 仓库不放 —— 单个就好几 MB)
 for m in yolov8 yolov7; do
     cp "$SRC/mpp/sample/svp/svp_npu/data/model/$m.om" "$HERE/opt_build/model/"
+done
+# 自己用 atc 转的模型(小, 就放在仓库 tools_atc/ 里, 见那边的 README)。
+# 只列**带 AIPP** 的版本: 不带 AIPP 的输入是 float32, 固件的零拷贝喂法不适用,
+# 放进去只会在网页模型列表里挂着骗人。
+for m in yunet_face_aipp; do
+    if [ -f "$HERE/tools_atc/$m.om" ]; then
+        cp "$HERE/tools_atc/$m.om" "$HERE/opt_build/model/"
+    else
+        echo "  !! 缺 tools_atc/$m.om —— 按 tools_atc/README.md 用 atc 转一个再来"
+        exit 1
+    fi
 done
 
 echo "[4/4] 打包 squashfs (xz, 256K block —— 与板子一致) ..."
