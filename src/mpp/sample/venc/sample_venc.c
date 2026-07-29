@@ -3113,8 +3113,14 @@ static pthread_mutex_t g_web_lock = PTHREAD_MUTEX_INITIALIZER;
 static ot_venc_chn g_web_chn = 0;
 static int g_web_save_cnt = 0;
 /* 4K JPEG snapshot channel (chn3): continuous low-fps MJPEG, newest frame kept */
-static unsigned char g_snap4k[4 * 1024 * 1024];
+/* 4K MJPEG 单帧缓冲。**8MB 不是随手写的**: 原来是 4MB, 而细节多的 4K 画面(开灯的房间)
+ * 一帧就能超过 4MB —— 于是只有"包0=JPEG头(678字节)"塞得进去, "包1=图像数据"被丢掉,
+ * 结果是一张结构完整却没有像素的 JPEG, 看上去全黑, 还时好时坏(取决于场景复杂度)。
+ * 查了整整一轮才定位, 所以这里既加大也加了溢出告警, 见 web_reader4k_thread。 */
+#define SNAP4K_CAP (8 * 1024 * 1024)
+static unsigned char g_snap4k[SNAP4K_CAP];
 static volatile int g_snap4k_len = 0;
+static volatile int g_snap4k_drop = 0;   /* 因装不下而整帧丢弃的次数(网页 /info 可看) */
 static pthread_mutex_t g_snap4k_lock = PTHREAD_MUTEX_INITIALIZER;
 static volatile int g_snap4k_ok = 0;   /* 1 = chn3 came up ok */
 #define SNAP4K_CHN 3
@@ -3369,6 +3375,36 @@ static const char g_web_html[] =
 "      <div class=\"btnrow\"><button class=\"btn g\" onclick=\"saveExp()\">应用并保存</button></div>"
 "      <div class=\"msg\" id=\"expmsg\"></div>"
 "    </div>"
+"    <div class=\"card\"><h4>🌡️ 白平衡</h4>"
+"      <div class=\"pvmini\"><div class=\"pm\"><span>当前色温</span><b id=\"w_ct\">--</b></div>"
+"        <div class=\"pm\"><span>R 增益</span><b id=\"w_r\">--</b></div>"
+"        <div class=\"pm\"><span>B 增益</span><b id=\"w_b\">--</b></div>"
+"        <div class=\"pm\"><span>饱和度</span><b id=\"w_sat\">--</b></div></div>"
+"      <div class=\"fld\" style=\"margin-top:10px\"><label>白平衡模式</label><select id=\"w_man\">"
+"        <option value=\"0\">自动 AWB</option><option value=\"1\">锁色温（推荐）</option>"
+"        <option value=\"2\">手动 R/B 增益</option></select></div>"
+"      <div class=\"fld\"><label>色温预设</label><select id=\"w_pre\">"
+"        <option value=\"2800\">2800K 白炽灯</option><option value=\"4000\">4000K 荧光灯</option>"
+"        <option value=\"5000\">5000K 中性</option><option value=\"5500\">5500K 日光</option>"
+"        <option value=\"6500\">6500K 阴天</option><option value=\"7500\">7500K 阴影</option></select></div>"
+"      <div class=\"row\"><label>色温微调</label><input type=range min=2000 max=10000 step=100 value=5500 id=w_temp><span class=val id=w_tempv>5500K</span></div>"
+"      <div class=\"row\"><label>洋红↔绿</label><input type=range min=-64 max=64 step=1 value=0 id=w_shift><span class=val id=w_shiftv>0</span></div>"
+"      <div class=\"row\"><label>R 增益（手动挡）</label><input type=range min=64 max=1024 step=4 value=256 id=w_rg><span class=val id=w_rgv>1.00x</span></div>"
+"      <div class=\"row\"><label>B 增益（手动挡）</label><input type=range min=64 max=1024 step=4 value=256 id=w_bg><span class=val id=w_bgv>1.00x</span></div>"
+"      <div class=\"btnrow\"><button class=\"btn g\" onclick=\"saveWb()\">应用并保存</button>"
+"        <button class=\"btn gray\" onclick=\"wbFromAuto()\">取当前 AWB 值</button></div>"
+"      <div class=\"msg\" id=\"wbmsg\"></div>"
+"      <div class=\"hint\">混合光源下 AWB 会飘，拍一组照片前把它锁死。「取当前 AWB 值」= 让自动挡先算好，再把结果固定下来。</div>"
+"    </div>"
+"    <div class=\"card\"><h4>🔍 放大对焦</h4>"
+"      <div class=\"fld\"><label>放大倍数</label><select id=\"z_z\">"
+"        <option value=\"1\">1x（关）</option><option value=\"2\">2x</option>"
+"        <option value=\"4\">4x</option><option value=\"8\">8x</option></select></div>"
+"      <div class=\"row\"><label>中心 X</label><input type=range min=0 max=1000 step=10 value=500 id=z_cx><span class=val id=z_cxv>50%</span></div>"
+"      <div class=\"row\"><label>中心 Y</label><input type=range min=0 max=1000 step=10 value=500 id=z_cy><span class=val id=z_cyv>50%</span></div>"
+"      <div class=\"msg\" id=\"zmsg\"></div>"
+"      <div class=\"hint\">只放大预览和屏幕，<b>4K 主码流和 AI 检测不受影响</b>。手动镜头合焦就靠它 —— 配合上面的峰值描边更准。不存配置，重启即复位。</div>"
+"    </div>"
 "    <div class=\"card\"><h4>🎯 对焦助手</h4>"
 "      <div class=\"stat full\"><div class=\"k\">焦点值（越大越清晰）</div><div class=\"n\" id=\"fv_now\">--</div><div class=\"bar\"><i id=\"fv_bar\" style=\"width:0\"></i></div></div>"
 "      <div class=\"row\" style=\"margin-top:8px\"><label>峰值</label><span class=\"val\" id=\"fv_peak\">--</span></div>"
@@ -3388,6 +3424,7 @@ static const char g_web_html[] =
 "    </div>"
 "    <div class=\"card\"><h4>🕒 OSD 时间水印</h4>"
 "      <div class=\"sw\"><input type=\"checkbox\" id=\"osd_en\"><label for=\"osd_en\">在画面左上角叠加时间戳</label></div>"
+"      <div class=\"sw\"><input type=\"checkbox\" id=\"osd_evf\"><label for=\"osd_evf\">取景界面：直方图＋拍摄参数叠加到画面（网页/屏幕/抓拍都能看到，像相机取景器）</label></div>"
 "      <div class=\"sw\"><input type=\"checkbox\" id=\"osd_focus\"><label for=\"osd_focus\">叠加焦点值+对焦条（对焦时用，看着屏幕拧镜头）</label></div>"
 "      <div class=\"sw\"><input type=\"checkbox\" id=\"focus_spot\" checked><label for=\"focus_spot\">点对焦（只测画面中心，并画框）——取消则全画幅平均</label></div>"
 "      <div class=\"sw\"><input type=\"checkbox\" id=\"focus_follow\"><label for=\"focus_follow\">对焦区跟着 AI 检测的主体走（黄框＝正在测它；人脸模型会自动缩到双眼上，青框＝眼控对焦）</label></div>"
@@ -3520,7 +3557,7 @@ static const char g_web_html[] =
 "  document.querySelectorAll('#nav button').forEach(function(x){x.classList.remove('on')});b.classList.add('on');"
 "  document.querySelectorAll('.tab').forEach(function(x){x.classList.remove('on')});$(b.dataset.t).classList.add('on');"
 "  if(b.dataset.t=='sys'){pollInfo();loadNet();}if(b.dataset.t=='time')pollTime();if(b.dataset.t=='rtsp')loadRtsp();if(b.dataset.t=='reg')pollReg();if(b.dataset.t=='gpio')pollGpio();if(b.dataset.t=='scr')loadScr();"
-"  if(b.dataset.t=='img'){$('v2').src='/stream?'+Date.now();loadOsd();loadExp();pollExp();loadPeak();}else{if($('v2'))$('v2').removeAttribute('src');fvStop();}"
+"  if(b.dataset.t=='img'){$('v2').src='/stream?'+Date.now();loadOsd();loadExp();pollExp();loadPeak();loadWb();loadZoom();}else{if($('v2'))$('v2').removeAttribute('src');fvStop();}"
 "  if(b.dataset.t=='ai'){$('v3').src='/stream?'+Date.now();loadNpu();loadModels();pollNpu();}else{if($('v3'))$('v3').removeAttribute('src');}"
 "};});"
 "/* preview */"
@@ -3593,7 +3630,7 @@ static const char g_web_html[] =
 "    $('fv_now').innerText=v;$('fv_peak').innerText=fvMax;$('fv_bar').style.width=(fvMax>0?Math.round(v/fvMax*100):0)+'%'"
 "  })['catch'](function(){})},300)}"
 "/* osd */"
-"function loadOsd(){fetch('/getosd').then(function(r){return r.json()}).then(function(j){$('osd_en').checked=!!j.en;if($('osd_focus'))$('osd_focus').checked=!!j.focus;if($('focus_spot'))$('focus_spot').checked=!!j.spot;if($('focus_follow'))$('focus_follow').checked=!!j.follow})['catch'](function(){})}"
+"function loadOsd(){fetch('/getosd').then(function(r){return r.json()}).then(function(j){$('osd_en').checked=!!j.en;if($('osd_evf'))$('osd_evf').checked=!!j.evf;if($('osd_focus'))$('osd_focus').checked=!!j.focus;if($('focus_spot'))$('focus_spot').checked=!!j.spot;if($('focus_follow'))$('focus_follow').checked=!!j.follow})['catch'](function(){})}"
 "/* 峰值描边 + 斑马纹 */"
 "function loadPeak(){fetch('/peak').then(function(r){return r.json()}).then(function(j){"
 "  $('pk_en').checked=!!j.peak;$('zb_en').checked=!!j.zebra;"
@@ -3603,7 +3640,7 @@ static const char g_web_html[] =
 "$('zb_th').oninput=function(){$('zb_thv').innerText=$('zb_th').value};"
 "function savePeak(){var u='/setpeak?peak='+($('pk_en').checked?1:0)+'&th='+$('pk_th').value+'&color='+$('pk_color').value+'&zebra='+($('zb_en').checked?1:0)+'&zth='+$('zb_th').value;"
 "  msg('pkmsg','正在应用…');fetch(u).then(function(r){return r.text()}).then(function(t){msg('pkmsg',t);loadPeak()})['catch'](function(){msg('pkmsg','失败')})}"
-"function saveOsd(){fetch('/setosd?en='+($('osd_en').checked?1:0)+'&focus='+($('osd_focus').checked?1:0)+'&spot='+($('focus_spot').checked?1:0)+'&follow='+($('focus_follow').checked?1:0)).then(function(r){return r.text()}).then(function(t){msg('osdmsg',t)})['catch'](function(){msg('osdmsg','失败')})}"
+"function saveOsd(){fetch('/setosd?en='+($('osd_en').checked?1:0)+'&evf='+($('osd_evf').checked?1:0)+'&focus='+($('osd_focus').checked?1:0)+'&spot='+($('focus_spot').checked?1:0)+'&follow='+($('focus_follow').checked?1:0)).then(function(r){return r.text()}).then(function(t){msg('osdmsg',t)})['catch'](function(){msg('osdmsg','失败')})}"
 "/* exposure + histogram */"
 "function shTxt(us){if(us==null||us<0)return'--';if(us>=1000000)return(us/1000000).toFixed(1)+'s';return'1/'+Math.round(1000000/us)}"
 "function loadExp(){fetch('/exp').then(function(r){return r.json()}).then(function(j){"
@@ -3614,6 +3651,7 @@ static const char g_web_html[] =
 "function expNow(j){$('e_sh').innerText=shTxt(j.cur_us);$('e_ga').innerText=(j.cur_gain>=0?(j.cur_gain/100).toFixed(1)+'x':'--');"
 "  $('e_iso').innerText=(j.iso>=0?j.iso:'--');$('e_fps').innerText=(j.fps>=0?(j.fps/100).toFixed(1):'--');$('e_lum').innerText=(j.lum>=0?j.lum:'--')}"
 "function pollExp(){fetch('/exp').then(function(r){return r.json()}).then(expNow)['catch'](function(){});"
+"  fetch('/wb').then(function(r){return r.json()}).then(wbNow)['catch'](function(){});"
 "  fetch('/hist').then(function(r){return r.json()}).then(drawHist)['catch'](function(){})}"
 "function drawHist(j){var c=$('histc');if(!c||!c.getContext)return;var g=c.getContext('2d'),b=j.bins||[];"
 "  g.clearRect(0,0,c.width,c.height);if(!b.length)return;var mx=1;for(var i=0;i<b.length;i++){if(b[i]>mx)mx=b[i]}"
@@ -3623,6 +3661,42 @@ static const char g_web_html[] =
 "$('e_comp').oninput=function(){$('e_compv').innerText=$('e_comp').value};"
 "function saveExp(){var u='/setexp?manual='+$('e_man').value+'&us='+$('e_us').value+'&gain='+$('e_gain').value+'&comp='+$('e_comp').value+'&maxus='+$('e_max').value;"
 "  msg('expmsg','正在应用…');fetch(u).then(function(r){return r.text()}).then(function(t){msg('expmsg',t);setTimeout(loadExp,600)})['catch'](function(){msg('expmsg','失败')})}"
+"/* white balance */"
+"var WBONE=256;"
+"function gtxt(g){return (g/WBONE).toFixed(2)+'x'}"
+"function loadWb(){fetch('/wb').then(function(r){return r.json()}).then(function(j){"
+"  WBONE=j.one||256;$('w_man').value=String(j.manual);"
+"  $('w_temp').value=j.temp;$('w_tempv').innerText=j.temp+'K';$('w_pre').value=String(j.temp);"
+"  $('w_shift').value=j.shift;$('w_shiftv').innerText=j.shift;"
+"  $('w_rg').value=j.rgain;$('w_rgv').innerText=gtxt(j.rgain);"
+"  $('w_bg').value=j.bgain;$('w_bgv').innerText=gtxt(j.bgain);wbNow(j)})['catch'](function(){})}"
+"function wbNow(j){$('w_ct').innerText=(j.cur_temp>0?j.cur_temp+'K':'--');"
+"  $('w_r').innerText=(j.cur_r>=0?gtxt(j.cur_r):'--');$('w_b').innerText=(j.cur_b>=0?gtxt(j.cur_b):'--');"
+"  $('w_sat').innerText=(j.sat>=0?j.sat:'--')}"
+"$('w_temp').oninput=function(){$('w_tempv').innerText=$('w_temp').value+'K'};"
+"$('w_shift').oninput=function(){$('w_shiftv').innerText=$('w_shift').value};"
+"$('w_rg').oninput=function(){$('w_rgv').innerText=gtxt($('w_rg').value)};"
+"$('w_bg').oninput=function(){$('w_bgv').innerText=gtxt($('w_bg').value)};"
+"$('w_pre').onchange=function(){$('w_temp').value=$('w_pre').value;$('w_tempv').innerText=$('w_pre').value+'K'};"
+"function saveWb(){var u='/setwb?manual='+$('w_man').value+'&temp='+$('w_temp').value+'&shift='+$('w_shift').value"
+"  +'&rgain='+$('w_rg').value+'&bgain='+$('w_bg').value;"
+"  msg('wbmsg','正在应用…');fetch(u).then(function(r){return r.text()}).then(function(t){msg('wbmsg',t);setTimeout(loadWb,600)})['catch'](function(){msg('wbmsg','失败')})}"
+/* 先读 ISP 自动算出来的增益, 填进手动挡再切过去 —— 等于"锁住现在这个白平衡" */
+"function wbFromAuto(){fetch('/wb').then(function(r){return r.json()}).then(function(j){"
+"  if(j.cur_r>0){$('w_rg').value=Math.min(1024,j.cur_r);$('w_rgv').innerText=gtxt(j.cur_r)}"
+"  if(j.cur_b>0){$('w_bg').value=Math.min(1024,j.cur_b);$('w_bgv').innerText=gtxt(j.cur_b)}"
+"  if(j.cur_temp>0){$('w_temp').value=Math.max(2000,Math.min(10000,j.cur_temp));$('w_tempv').innerText=$('w_temp').value+'K'}"
+"  $('w_man').value='2';msg('wbmsg','已取当前 AWB 值，点「应用并保存」锁定')})['catch'](function(){msg('wbmsg','读取失败')})}"
+"/* punch-in zoom */"
+"function loadZoom(){fetch('/zoom').then(function(r){return r.json()}).then(function(j){"
+"  $('z_z').value=String(j.z);$('z_cx').value=j.cx;$('z_cxv').innerText=Math.round(j.cx/10)+'%';"
+"  $('z_cy').value=j.cy;$('z_cyv').innerText=Math.round(j.cy/10)+'%'})['catch'](function(){})}"
+"function applyZoom(){var u='/setzoom?z='+$('z_z').value+'&cx='+$('z_cx').value+'&cy='+$('z_cy').value;"
+"  msg('zmsg','…');fetch(u).then(function(r){return r.text()}).then(function(t){msg('zmsg',t)})['catch'](function(){msg('zmsg','失败')})}"
+"$('z_z').onchange=applyZoom;"
+"$('z_cx').oninput=function(){$('z_cxv').innerText=Math.round($('z_cx').value/10)+'%'};"
+"$('z_cy').oninput=function(){$('z_cyv').innerText=Math.round($('z_cy').value/10)+'%'};"
+"$('z_cx').onchange=applyZoom;$('z_cy').onchange=applyZoom;"
 "/* ai detect */"
 "function loadNpu(){fetch('/npu').then(function(r){return r.json()}).then(function(j){"
 "  $('npu_en').checked=!!j.en;$('npu_draw').checked=!!j.draw;$('npu_iv').value=j.interval;"
@@ -3721,6 +3795,8 @@ static int  g_af_ok = 0;
 static int  g_osd_focus_en = 0;    /* 把焦点值+对焦条叠到画面上(对焦时开, 默认关) */
 static int  g_focus_spot = 1;      /* 1=中心点对焦(默认) 0=全画幅平均 */
 static int  g_focus_follow = 0;    /* 1=对焦测量区跟着 NPU 检测到的主体走(眼控/脸控对焦的基础) */
+/* 取景界面: 直方图 + 拍摄参数直接画进画面(不是网页) —— 网页/MJPEG/DSI屏/抓拍全都自带 */
+static int  g_evf_en = 1;
 /* 手动曝光 (ISP AE). 相机就得能手动. gain 用"倍数×100"存(100=1.0x), 对上 ISP 的 22.10 定点 */
 static int  g_exp_manual = 0;      /* 曝光挡位: 0=自动P  1=快门优先S(快门手动/增益自动)  2=全手动M */
 static int  g_exp_us = 20000;      /* 手动快门, 微秒 (20000us = 1/50s) */
@@ -3728,6 +3804,22 @@ static int  g_exp_gain = 100;      /* 手动增益 ×100 (100=1.0x, 1600=16x) */
 static int  g_exp_comp = 56;       /* 自动模式下的曝光补偿 0..255 (ISP 默认 56) */
 static int  g_exp_maxus = 0;       /* 自动模式下最长快门(微秒), 0=不限制. 防止暗处糊成一片 */
 static unsigned long long g_focus_peak = 0;  /* 对焦条峰值(缩放用) */
+/* 手动白平衡 (ISP AWB). 相机不该只有"自动白平衡" —— 混合光源下 AWB 会飘, 拍序列必须锁死.
+ * ⚠ 增益是 4.8 定点: WB_GAIN_ONE(0x100) = 1.0x, 上限 0xFFF ≈ 16x.
+ *   (读回用的 ot_isp_wb_info 标的是 8.8, 但小数位同样是 8 位 —— 两边刻度一致, 只是量程不同) */
+#define WB_GAIN_ONE 0x100
+static int  g_wb_manual = 0;       /* 0=自动AWB  1=按色温锁(推荐)  2=手动 R/B 增益 */
+static int  g_wb_temp = 5500;      /* 色温 K (模式1), SDK 用 cal_gain_by_temp 换算成增益 */
+static int  g_wb_shift = 0;        /* 色温微调(洋红↔绿), 直接透传给 cal_gain_by_temp 的 shift */
+static int  g_wb_rgain = WB_GAIN_ONE;  /* 模式2: R 增益 4.8 定点 */
+static int  g_wb_bgain = WB_GAIN_ONE;  /* 模式2: B 增益 4.8 定点 */
+/* 放大对焦(punch-in): 手动镜头合焦最靠谱的办法就是放大看.
+ * 用 VPSS 通道 crop 实现 —— 只裁 chn2(预览/屏幕), 主码流 chn0 和送 NPU 的扩展通道都不受影响,
+ * 所以放大查焦的同时 4K 录制和 AI 检测照常。**故意不存 param**: 这是临时取景动作,
+ * 重启后还停在放大状态只会让人莫名其妙。 */
+static int  g_zoom = 1;            /* 放大倍数: 1=关 2/4/8 */
+static int  g_zoom_cx = 500;       /* 放大中心 X, 千分比 (可平移查看边角) */
+static int  g_zoom_cy = 500;       /* 放大中心 Y, 千分比 */
 /* NPU 目标检测 (YOLOv8, svp_acl). g_npu_en=配置开关; g_npu_interval=每N帧推一次 */
 static int  g_npu_en = 1;          /* 默认开(本机就叫 AI camera); web「AI检测」页可关 */
 static int  g_npu_interval = 3;    /* 每 3 帧推理一次, 省 4×A55 负载 */
@@ -3783,13 +3875,16 @@ static void cam_cfg_save(void)
                "npu_en=%d\nnpu_interval=%d\nnpu_draw=%d\nnpu_score=%d\nnpu_cls=%s\nnpu_nms=%d\n"
                "npu_model=%s\nfocus_follow=%d\n"
                "exp_manual=%d\nexp_us=%d\nexp_gain=%d\nexp_comp=%d\nexp_maxus=%d\n"
-               "peak_en=%d\npeak_th=%d\npeak_color=%d\nzebra_en=%d\nzebra_th=%d\n",
+               "peak_en=%d\npeak_th=%d\npeak_color=%d\nzebra_en=%d\nzebra_th=%d\n"
+               "wb_manual=%d\nwb_temp=%d\nwb_shift=%d\nwb_rgain=%d\nwb_bgain=%d\nevf_en=%d\n",
         g_cam_user, g_cam_pass, g_rtsp_auth_en, g_net_ip, g_net_mask, g_net_gw,
         g_isp_luma, g_isp_contr, g_isp_satu, g_isp_hue,
         g_scr_en, g_scr_bright, g_scr_src, g_scr_lr, g_osd_en, g_osd_focus_en, g_focus_spot,
         g_npu_en, g_npu_interval, g_npu_draw, g_npu_score, g_npu_cls, g_npu_nms, g_npu_model,
         g_focus_follow, g_exp_manual, g_exp_us, g_exp_gain, g_exp_comp, g_exp_maxus,
-        g_peak_en, g_peak_th, g_peak_color, g_zebra_en, g_zebra_th);
+        g_peak_en, g_peak_th, g_peak_color, g_zebra_en, g_zebra_th,
+        g_wb_manual, g_wb_temp, g_wb_shift, g_wb_rgain, g_wb_bgain, g_evf_en);
+        /* 注意: g_zoom* 是**故意不存**的 —— 放大对焦是临时取景动作, 见其定义处的说明 */
     pthread_mutex_unlock(&g_cfg_lock);
     fclose(f);
 }
@@ -3841,6 +3936,16 @@ static void cam_cfg_load(void)
         else if (!strncmp(line, "peak_color=", 11)) { g_peak_color = atoi(line + 11) & 3; }
         else if (!strncmp(line, "zebra_en=", 9)) { g_zebra_en = atoi(line + 9) ? 1 : 0; }
         else if (!strncmp(line, "zebra_th=", 9)) { g_zebra_th = atoi(line + 9); if (g_zebra_th < 100) { g_zebra_th = 100; } if (g_zebra_th > 255) { g_zebra_th = 255; } }
+        /* 白平衡也是三挡(自动/色温/手动增益), 同样别按布尔存 */
+        else if (!strncmp(line, "wb_manual=", 10)) {
+            g_wb_manual = atoi(line + 10);
+            if (g_wb_manual < 0 || g_wb_manual > 2) { g_wb_manual = 0; }
+        }
+        else if (!strncmp(line, "wb_temp=", 8)) { g_wb_temp = atoi(line + 8); if (g_wb_temp < 2000) { g_wb_temp = 2000; } if (g_wb_temp > 15000) { g_wb_temp = 15000; } }
+        else if (!strncmp(line, "wb_shift=", 9)) { g_wb_shift = atoi(line + 9); }
+        else if (!strncmp(line, "wb_rgain=", 9)) { g_wb_rgain = atoi(line + 9); if (g_wb_rgain < 1) { g_wb_rgain = 1; } if (g_wb_rgain > 0xFFF) { g_wb_rgain = 0xFFF; } }
+        else if (!strncmp(line, "wb_bgain=", 9)) { g_wb_bgain = atoi(line + 9); if (g_wb_bgain < 1) { g_wb_bgain = 1; } if (g_wb_bgain > 0xFFF) { g_wb_bgain = 0xFFF; } }
+        else if (!strncmp(line, "evf_en=", 7)) { g_evf_en = atoi(line + 7) ? 1 : 0; }
     }
     pthread_mutex_unlock(&g_cfg_lock);
     fclose(f);
@@ -4092,6 +4197,95 @@ static void cam_exp_read(cam_exp_now *n)
     n->iso = (int)info.iso;
     n->fps = (int)info.fps;
     n->lum = (int)info.ave_lum;
+}
+
+/* 手动白平衡. 三挡:
+ *   0 自动 —— ISP 的 AWB 自己跑
+ *   1 色温 —— 锁成某个开尔文值。**这是最像相机的一挡**: 用 SDK 的 cal_gain_by_temp
+ *             按色温反算出 R/Gr/Gb/B 增益, 不用自己拧 RGB
+ *   2 手动 —— 直接给 R/B 增益(4.8 定点), 给死磕的人留的
+ * 模式 1 要拿一份当前 wb_attr 传进 cal_gain_by_temp(它要读里面的标定数据), 所以先 get 再算。*/
+static int cam_wb_apply(void)
+{
+    ot_isp_wb_attr wb;
+    if (ot_mpi_isp_get_wb_attr(0, &wb) != TD_SUCCESS) { return -1; }
+    if (g_wb_manual) {
+        wb.op_type = OT_OP_MODE_MANUAL;
+        if (g_wb_manual == 1) {
+            td_u16 gain[4] = { WB_GAIN_ONE, WB_GAIN_ONE, WB_GAIN_ONE, WB_GAIN_ONE };
+            td_u16 t = (td_u16)((g_wb_temp < 2000) ? 2000 : ((g_wb_temp > 15000) ? 15000 : g_wb_temp));
+            if (ot_mpi_isp_cal_gain_by_temp(0, &wb, t, (td_s16)g_wb_shift, gain) != TD_SUCCESS) {
+                return -1;
+            }
+            wb.manual_attr.r_gain  = gain[0];
+            wb.manual_attr.gr_gain = gain[1];
+            wb.manual_attr.gb_gain = gain[2];
+            wb.manual_attr.b_gain  = gain[3];
+        } else {
+            int r = g_wb_rgain, b = g_wb_bgain;
+            if (r < 1) { r = 1; } if (r > 0xFFF) { r = 0xFFF; }
+            if (b < 1) { b = 1; } if (b > 0xFFF) { b = 0xFFF; }
+            wb.manual_attr.r_gain  = (td_u16)r;
+            wb.manual_attr.gr_gain = WB_GAIN_ONE;    /* 绿通道作基准, 不动 */
+            wb.manual_attr.gb_gain = WB_GAIN_ONE;
+            wb.manual_attr.b_gain  = (td_u16)b;
+        }
+    } else {
+        wb.op_type = OT_OP_MODE_AUTO;
+    }
+    if (ot_mpi_isp_set_wb_attr(0, &wb) != TD_SUCCESS) { return -1; }
+    return 0;
+}
+
+/* 读回 ISP 实际生效的白平衡 —— 自动挡下就是 AWB 算出来的, 网页可以看着它挑色温 */
+typedef struct { int r, gr, gb, b, temp, sat; } cam_wb_now;
+static void cam_wb_read(cam_wb_now *n)
+{
+    ot_isp_wb_info info;
+    n->r = n->gr = n->gb = n->b = n->temp = n->sat = -1;
+    if (ot_mpi_isp_query_wb_info(0, &info) != TD_SUCCESS) { return; }
+    n->r = (int)info.r_gain;   n->gr = (int)info.gr_gain;
+    n->gb = (int)info.gb_gain; n->b  = (int)info.b_gain;
+    n->temp = (int)info.color_temp;
+    n->sat  = (int)info.saturation;
+}
+
+/* 放大对焦: 在 VPSS 通道级 crop 一块再让缩放器铺满输出 = 光学等效的"放大查焦".
+ * 裁的是通道**输入**(= VPSS group 输出, 3840x2160), 所以 zoom=4 时裁 960x540 铺满 1280x720。
+ * 只作用于 g_scr_src 那条预览通道; 主码流/扩展通道不碰。 */
+#define ZOOM_SRC_W 3840          /* VPSS group 输出 = 传感器全画幅, crop 坐标以此为准 */
+#define ZOOM_SRC_H 2160
+static int cam_zoom_apply(void)
+{
+    ot_vpss_crop_info crop;
+    int z = g_zoom, cx = g_zoom_cx, cy = g_zoom_cy;
+    int w, h, x, y;
+    memset(&crop, 0, sizeof(crop));
+    /* ⚠ 关闭时也得填一个**合法的**矩形: MPP 连 enable=FALSE 的调用也会校验 crop_rect,
+     * 传全零(width/height=0)会被判非法直接拒绝 —— 于是放大就再也关不掉了。 */
+    crop.crop_mode = OT_COORD_ABS;
+    crop.crop_rect.x = 0;
+    crop.crop_rect.y = 0;
+    crop.crop_rect.width  = ZOOM_SRC_W;
+    crop.crop_rect.height = ZOOM_SRC_H;
+    if (z <= 1) {
+        crop.enable = TD_FALSE;
+        return (ss_mpi_vpss_set_chn_crop(0, g_web_chn, &crop) == TD_SUCCESS) ? 0 : -1;
+    }
+    if (z > 16) { z = 16; }
+    if (cx < 0) { cx = 0; } if (cx > 1000) { cx = 1000; }
+    if (cy < 0) { cy = 0; } if (cy > 1000) { cy = 1000; }
+    w = (ZOOM_SRC_W / z) & ~1;          /* 偶数对齐, VPSS 要求 */
+    h = (ZOOM_SRC_H / z) & ~1;
+    x = (int)((long)(ZOOM_SRC_W - w) * cx / 1000) & ~1;
+    y = (int)((long)(ZOOM_SRC_H - h) * cy / 1000) & ~1;
+    crop.enable = TD_TRUE;
+    crop.crop_mode = OT_COORD_ABS;
+    crop.crop_rect.x = x;
+    crop.crop_rect.y = y;
+    crop.crop_rect.width  = (td_u32)w;
+    crop.crop_rect.height = (td_u32)h;
+    return (ss_mpi_vpss_set_chn_crop(0, g_web_chn, &crop) == TD_SUCCESS) ? 0 : -1;
 }
 
 /* 亮度直方图: ISP 硬件给 1024 bin, 归到 64 格返回 (画面/网页都用得上) */
@@ -4683,8 +4877,8 @@ static void cam_http_focus(int fd)
 static void cam_http_getosd(int fd)
 {
     char j[110]; int n;
-    n = snprintf(j, sizeof(j), "{\"en\":%d,\"ready\":%d,\"focus\":%d,\"spot\":%d,\"follow\":%d}",
-                 g_osd_en, g_osd_ready, g_osd_focus_en, g_focus_spot, g_focus_follow);
+    n = snprintf(j, sizeof(j), "{\"en\":%d,\"ready\":%d,\"focus\":%d,\"spot\":%d,\"follow\":%d,\"evf\":%d}",
+                 g_osd_en, g_osd_ready, g_osd_focus_en, g_focus_spot, g_focus_follow, g_evf_en);
     cam_http_body(fd, "application/json", j, n);
 }
 
@@ -4733,6 +4927,87 @@ static void cam_http_setexp(int fd, const char *req)
                                 : "ISP \xe6\x8b\x92\xe7\xbb\x9d");            /* ISP 拒绝 */
 }
 
+/* GET /wb -> 白平衡设置 + ISP 当前实际增益/色温 (自动挡时可以照着它挑色温) */
+static void cam_http_wb(int fd)
+{
+    char j[256]; int n;
+    cam_wb_now now;
+    cam_wb_read(&now);
+    n = snprintf(j, sizeof(j),
+        "{\"manual\":%d,\"temp\":%d,\"shift\":%d,\"rgain\":%d,\"bgain\":%d,"
+        "\"cur_r\":%d,\"cur_gr\":%d,\"cur_gb\":%d,\"cur_b\":%d,\"cur_temp\":%d,\"sat\":%d,\"one\":%d}",
+        g_wb_manual, g_wb_temp, g_wb_shift, g_wb_rgain, g_wb_bgain,
+        now.r, now.gr, now.gb, now.b, now.temp, now.sat, WB_GAIN_ONE);
+    cam_http_body(fd, "application/json", j, n);
+}
+
+/* GET /setwb?manual=&temp=&shift=&rgain=&bgain= : 立即生效 + 存 param */
+static void cam_http_setwb(int fd, const char *req)
+{
+    char v[24];
+    int changed = 0, rc;
+    if (cam_qparam(req, "manual", v, sizeof(v))) {
+        int m = atoi(v);
+        g_wb_manual = (m < 0) ? 0 : ((m > 2) ? 2 : m);   /* 0=自动 1=色温 2=手动增益 */
+        changed = 1;
+    }
+    if (cam_qparam(req, "temp", v, sizeof(v))) {
+        int t = atoi(v);
+        if (t < 2000) { t = 2000; }          /* 烛光以下 */
+        if (t > 15000) { t = 15000; }        /* 深阴影以上 */
+        g_wb_temp = t; changed = 1;
+    }
+    if (cam_qparam(req, "shift", v, sizeof(v))) { g_wb_shift = atoi(v); changed = 1; }
+    if (cam_qparam(req, "rgain", v, sizeof(v))) {
+        int g = atoi(v);
+        if (g < 1) { g = 1; } if (g > 0xFFF) { g = 0xFFF; }
+        g_wb_rgain = g; changed = 1;
+    }
+    if (cam_qparam(req, "bgain", v, sizeof(v))) {
+        int g = atoi(v);
+        if (g < 1) { g = 1; } if (g > 0xFFF) { g = 0xFFF; }
+        g_wb_bgain = g; changed = 1;
+    }
+    if (!changed) { cam_http_text(fd, "no change"); return; }
+    rc = cam_wb_apply();
+    cam_cfg_save();
+    cam_http_text(fd, (rc == 0) ? "\xe5\xb7\xb2\xe5\xba\x94\xe7\x94\xa8"      /* 已应用 */
+                                : "ISP \xe6\x8b\x92\xe7\xbb\x9d");            /* ISP 拒绝 */
+}
+
+/* GET /zoom -> 放大对焦状态 (不存 param, 所以只是运行时值) */
+static void cam_http_zoom(int fd)
+{
+    char j[96]; int n;
+    n = snprintf(j, sizeof(j), "{\"z\":%d,\"cx\":%d,\"cy\":%d,\"srcw\":%d,\"srch\":%d}",
+                 g_zoom, g_zoom_cx, g_zoom_cy, ZOOM_SRC_W, ZOOM_SRC_H);
+    cam_http_body(fd, "application/json", j, n);
+}
+
+/* GET /setzoom?z=&cx=&cy= : 只影响预览通道, 主码流和 AI 检测照常 */
+static void cam_http_setzoom(int fd, const char *req)
+{
+    char v[24];
+    int changed = 0, rc;
+    if (cam_qparam(req, "z", v, sizeof(v))) {
+        int z = atoi(v);
+        if (z < 1) { z = 1; } if (z > 16) { z = 16; }
+        g_zoom = z; changed = 1;
+    }
+    if (cam_qparam(req, "cx", v, sizeof(v))) {
+        int c = atoi(v); if (c < 0) { c = 0; } if (c > 1000) { c = 1000; }
+        g_zoom_cx = c; changed = 1;
+    }
+    if (cam_qparam(req, "cy", v, sizeof(v))) {
+        int c = atoi(v); if (c < 0) { c = 0; } if (c > 1000) { c = 1000; }
+        g_zoom_cy = c; changed = 1;
+    }
+    if (!changed) { cam_http_text(fd, "no change"); return; }
+    rc = cam_zoom_apply();
+    cam_http_text(fd, (rc == 0) ? "\xe5\xb7\xb2\xe5\xba\x94\xe7\x94\xa8"      /* 已应用 */
+                                : "VPSS \xe6\x8b\x92\xe7\xbb\x9d");           /* VPSS 拒绝 */
+}
+
 /* GET /hist -> 64 格亮度直方图 (ISP 硬件 1024 bin 归并) */
 static void cam_http_hist(int fd)
 {
@@ -4755,6 +5030,12 @@ static void cam_http_setosd(int fd, const char *req)
     if (cam_qparam(req, "en", v, sizeof(v))) {
         pthread_mutex_lock(&g_cfg_lock);
         g_osd_en = atoi(v) ? 1 : 0;
+        pthread_mutex_unlock(&g_cfg_lock);
+        changed = 1;
+    }
+    if (cam_qparam(req, "evf", v, sizeof(v))) {            /* 直方图+拍摄参数叠加 */
+        pthread_mutex_lock(&g_cfg_lock);
+        g_evf_en = atoi(v) ? 1 : 0;
         pthread_mutex_unlock(&g_cfg_lock);
         changed = 1;
     }
@@ -4877,17 +5158,32 @@ static void *web_reader4k_thread(void *arg)
         if (stream.pack == TD_NULL) { continue; }
         stream.pack_cnt = st.cur_packs;
         if (ss_mpi_venc_get_stream(chn, &stream, 100) != TD_SUCCESS) { free(stream.pack); continue; }
-        pthread_mutex_lock(&g_snap4k_lock);
-        g_snap4k_len = 0;
-        for (i = 0; i < stream.pack_cnt; i++) {
-            td_u32 l = stream.pack[i].len - stream.pack[i].offset;
-            if ((td_u32)g_snap4k_len + l <= sizeof(g_snap4k)) {
-                (td_void)memcpy_s(g_snap4k + g_snap4k_len, sizeof(g_snap4k) - g_snap4k_len,
-                    stream.pack[i].addr + stream.pack[i].offset, l);
-                g_snap4k_len += (int)l;
+        /* **先算总长, 要么整帧收下要么整帧丢掉**。以前是逐包"塞得下就塞", 塞不下的悄悄跳过 ——
+         * 4K JPEG 的头和图像数据是分开的两个包, 于是超长时只剩下头, 变成一张全黑的合法 JPEG。
+         * 宁可保留上一张好图, 也不要留一张骗人的黑图。 */
+        {
+            td_u32 total = 0;
+            for (i = 0; i < stream.pack_cnt; i++) {
+                total += stream.pack[i].len - stream.pack[i].offset;
+            }
+            if (total > sizeof(g_snap4k)) {
+                if ((g_snap4k_drop++ % 20) == 0) {
+                    printf("[snap4k] 一帧 %u 字节装不下 %u 的缓冲, 整帧丢弃(已丢 %d 次) —— "
+                           "画面太复杂就会这样, 需要调大 SNAP4K_CAP\n",
+                           total, (unsigned)sizeof(g_snap4k), g_snap4k_drop);
+                }
+            } else {
+                pthread_mutex_lock(&g_snap4k_lock);
+                g_snap4k_len = 0;
+                for (i = 0; i < stream.pack_cnt; i++) {
+                    td_u32 l = stream.pack[i].len - stream.pack[i].offset;
+                    (td_void)memcpy_s(g_snap4k + g_snap4k_len, sizeof(g_snap4k) - g_snap4k_len,
+                        stream.pack[i].addr + stream.pack[i].offset, l);
+                    g_snap4k_len += (int)l;
+                }
+                pthread_mutex_unlock(&g_snap4k_lock);
             }
         }
-        pthread_mutex_unlock(&g_snap4k_lock);
         ss_mpi_venc_release_stream(chn, &stream);
         free(stream.pack);
     }
@@ -4897,7 +5193,7 @@ static void *web_reader4k_thread(void *arg)
 /* serve newest 4K JPEG; as_download=1 forces a file download */
 static void web_http_snap4k(int fd, int as_download)
 {
-    static unsigned char sbuf[4 * 1024 * 1024];
+    static unsigned char sbuf[SNAP4K_CAP];   /* 必须和 g_snap4k 一样大, 否则这里再截断一次 */
     char hdr[256];
     int len, hn;
     if (!g_snap4k_ok) {
@@ -5102,6 +5398,8 @@ static void *web_client_thread(void *arg)
                    strstr(req, "GET /peak") != TD_NULL || strstr(req, "GET /setpeak") != TD_NULL ||
                    strstr(req, "GET /models") != TD_NULL || strstr(req, "GET /hist") != TD_NULL ||
                    strstr(req, "GET /exp") != TD_NULL || strstr(req, "GET /setexp") != TD_NULL ||
+                   strstr(req, "GET /wb") != TD_NULL || strstr(req, "GET /setwb") != TD_NULL ||
+                   strstr(req, "GET /zoom") != TD_NULL || strstr(req, "GET /setzoom") != TD_NULL ||
                    strstr(req, "GET /exec") != TD_NULL) {
             if (!authed) {
                 cam_http_401(fd);
@@ -5163,6 +5461,14 @@ static void *web_client_thread(void *arg)
                 cam_http_setnpu(fd, req);
             } else if (strstr(req, "GET /npu") != TD_NULL) {
                 cam_http_npu(fd);
+            } else if (strstr(req, "GET /setwb") != TD_NULL) {    /* 必须排在 /wb 和 /set 前 */
+                cam_http_setwb(fd, req);
+            } else if (strstr(req, "GET /wb") != TD_NULL) {
+                cam_http_wb(fd);
+            } else if (strstr(req, "GET /setzoom") != TD_NULL) {  /* 必须排在 /zoom 和 /set 前 */
+                cam_http_setzoom(fd, req);
+            } else if (strstr(req, "GET /zoom") != TD_NULL) {
+                cam_http_zoom(fd);
             } else if (strstr(req, "GET /imgsave") != TD_NULL) {
                 cam_cfg_save();
                 cam_http_text(fd, "\xe5\xb7\xb2\xe4\xbf\x9d\xe5\xad\x98");
@@ -6090,6 +6396,80 @@ static int cam_focus_zone(int *pr0, int *pr1, int *pc0, int *pc1)
 
 /* 重画 chn2 叠加层: 时间戳 + 焦点值/对焦条 + 中心对焦框 + 检测框. 由 OSD 线程单独调用
  * (单一写者, 免得和推理线程抢 region 画布). 全清后重画, 关掉的项自然消失. */
+/* ===================== 取景界面 (EVF 风格) =====================
+ * 把直方图和拍摄参数**画进叠加层**而不是网页 —— 这样网页预览 / MJPEG 流 / DSI 屏 /
+ * /snap 出来的图全都自带, 是同一份画面。"预览和屏幕一样"就是这么来的。
+ * 全部画在 chn2 那张唯一的全幅 region 上(同一通道的 region 不能重叠, 这是硬约束),
+ * 写者只有 OSD 线程一个。 */
+#define EVF_HIST_W  256
+#define EVF_HIST_H  80
+#define EVF_PAD     16
+
+/* 微秒 -> 相机习惯的快门写法 */
+static void cam_shutter_txt(int us, char *out, int cap)
+{
+    if (us <= 0) { (td_void)snprintf(out, (size_t)cap, "--"); return; }
+    if (us >= 1000000) { (td_void)snprintf(out, (size_t)cap, "%.1fs", us / 1000000.0); return; }
+    (td_void)snprintf(out, (size_t)cap, "1/%d", (int)(1000000.0 / us + 0.5));
+}
+
+/* 实心矩形填充(直方图底板用) */
+static void cam_evf_fill(unsigned char *base, int stride, int cw, int ch,
+                         int x0, int y0, int x1, int y1, unsigned short c)
+{
+    int x, y;
+    for (y = y0; y < y1; y++) {
+        if (y < 0 || y >= ch) { continue; }
+        for (x = x0; x < x1; x++) {
+            if (x < 0 || x >= cw) { continue; }
+            cam_det_px(base, stride, cw, ch, x, y, c);
+        }
+    }
+}
+
+static void cam_evf_draw(unsigned char *base, int stride)
+{
+    static unsigned int bins[HIST_BINS];
+    cam_exp_now e;
+    cam_wb_now w;
+    char line[96], sh[16];
+    int hx = DET_W - EVF_HIST_W - EVF_PAD;
+    int hy = DET_H - EVF_HIST_H - EVF_PAD;
+    int i;
+
+    /* --- 直方图: 右下角, 黑底白柱, 最右 3% 段标红(过曝警示, 和网页那版一致) --- */
+    if (cam_hist_get(bins) == 0) {
+        unsigned int mx = 1;
+        int hi = HIST_BINS * 97 / 100;
+        for (i = 0; i < HIST_BINS; i++) { if (bins[i] > mx) { mx = bins[i]; } }
+        cam_evf_fill(base, stride, DET_W, DET_H, hx - 2, hy - 2,
+                     hx + EVF_HIST_W + 2, hy + EVF_HIST_H + 2, 0x8000);
+        for (i = 0; i < HIST_BINS; i++) {
+            int bw = EVF_HIST_W / HIST_BINS;
+            int h = (int)((unsigned long long)bins[i] * (EVF_HIST_H - 2) / mx);
+            unsigned short c = (i >= hi) ? 0xFC00 : 0xFFFF;   /* 高光段红 */
+            if (h < 1 && bins[i] > 0) { h = 1; }
+            cam_evf_fill(base, stride, DET_W, DET_H, hx + i * bw, hy + EVF_HIST_H - h,
+                         hx + i * bw + bw - 1, hy + EVF_HIST_H, c);
+        }
+    }
+
+    /* --- 拍摄参数: 左下角一行, 和相机取景器一个意思 --- */
+    cam_exp_read(&e);
+    cam_wb_read(&w);
+    cam_shutter_txt(e.us, sh, sizeof(sh));
+    (td_void)snprintf(line, sizeof(line), "%s %s ISO%d %s%dK",
+        (g_exp_manual == 2) ? "M" : ((g_exp_manual == 1) ? "S" : "P"),
+        sh, (e.iso >= 0) ? e.iso : 0,
+        g_wb_manual ? "WB" : "AWB",
+        (g_wb_manual == 1) ? g_wb_temp : ((w.temp > 0) ? w.temp : 0));
+    {
+        int ty = DET_H - EVF_PAD - 16 * DET_TXT_SCALE;
+        cam_txt_blit(base, stride, DET_W, DET_H, EVF_PAD + 2, ty + 2, line, DET_TXT_SCALE, 0x8000);
+        cam_txt_blit(base, stride, DET_W, DET_H, EVF_PAD, ty, line, DET_TXT_SCALE, 0xFFFF);
+    }
+}
+
 static void cam_chn2_draw(void)
 {
     ot_rgn_canvas_info ci;
@@ -6108,6 +6488,8 @@ static void cam_chn2_draw(void)
     (td_void)memset_s(base, (size_t)stride * ci.size.height, 0, (size_t)stride * ci.size.height);
 
     cam_vis_blit(base, stride);      /* 先铺描边/斑马纹, 文字和框画在它上面 */
+
+    if (g_evf_en) { cam_evf_draw(base, stride); }   /* 直方图 + 拍摄参数 */
 
     if (g_osd_en) {                                   /* 时间戳(和主码流那层同样式) */
         time_t t = time(TD_NULL);
@@ -7302,6 +7684,10 @@ static td_s32 sample_venc_web(td_void)
     /* 对焦助手: 启用 ISP AF 焦点统计(非致命). OSD: 建 region + 起每秒刷新线程. */
     cam_af_enable();
     (td_void)cam_exp_apply();       /* 恢复上次的曝光设置(手动挡/补偿/最长快门) */
+    /* 白平衡: **只在配置成手动时才碰 ISP**。自动本来就是 ISP 的默认状态,
+     * 开机去做一次 get→原样 set 属于无谓写入 —— 这时 AWB 还没稳, 等于把一份
+     * 没定型的 auto_attr 写回去。 */
+    if (g_wb_manual) { (td_void)cam_wb_apply(); }
     cam_osd_init();
     { pthread_t osd_th; pthread_create(&osd_th, TD_NULL, cam_osd_thread, TD_NULL); }
 
